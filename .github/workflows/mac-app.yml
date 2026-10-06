@@ -1,5 +1,10 @@
 # Builds the Mac app (mac/build.sh) for Apple silicon and Intel and attaches the DMGs to a GitHub Release.
-# Push a tag to release:  git tag v0.2.0 && git push origin v0.2.0
+#
+# Releases go out on their own every other day at 07:00 UTC, when main changed since the last release: the
+# next patch version (v0.1.0 -> v0.1.1) is tagged once both builds pass, so a failed build releases nothing.
+# Installed apps offer the new version the next time they open. Other ways to run it:
+#   git tag v0.2.0 && git push origin v0.2.0      a release now, with a version you choose
+#   Actions > Mac app > Run workflow                a test build; tick "release" to publish it as the next version
 #
 # Signing is optional. Without these secrets the DMGs are ad-hoc signed and people allow the app once in
 # System Settings > Privacy & Security. With them, the app is signed with a Developer ID and notarized:
@@ -13,13 +18,62 @@ name: Mac app
 on:
   push:
     tags: ["v*"]
+  schedule:
+    - cron: "0 7 */2 * *"          # every other day (odd days of the month), 07:00 UTC
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish this build as the next version"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+concurrency:
+  group: mac-app
+  cancel-in-progress: false
+
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+      since: ${{ steps.v.outputs.since }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        env:
+          WANT_RELEASE: ${{ inputs.release }}
+        run: |
+          last=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -1)
+          if [ "$GITHUB_EVENT_NAME" = push ]; then           # a tag someone pushed
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"; echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "release=1" >> "$GITHUB_OUTPUT"; echo "build=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          IFS=. read -r major minor patch <<< "${last:-v0.0.0}"; major=${major#v}
+          next="v$major.$minor.$((patch + 1))"
+          changed=1
+          if [ -n "$last" ] && [ "$(git rev-list --count "$last"..HEAD)" = 0 ]; then changed=""; fi
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            [ -n "$changed" ] || { echo "Nothing new since $last: no release."; exit 0; }
+            release=1
+          else                                               # Run workflow: a test build unless "release" is ticked
+            release=""; [ "$WANT_RELEASE" = true ] && [ -n "$changed" ] && release=1
+          fi
+          version=${next#v}; [ -n "$release" ] || version="$version-test"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"; echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"; echo "since=$last" >> "$GITHUB_OUTPUT"; echo "build=1" >> "$GITHUB_OUTPUT"
+          echo "Building $version (release: ${release:-no}; last release $last)"
+
   build:
+    needs: version
+    if: needs.version.outputs.build
     strategy:
       fail-fast: false
       matrix:
@@ -58,8 +112,7 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          case "$VERSION" in [0-9]*) ;; *) VERSION=0.0.0-dev ;; esac
+          VERSION="${{ needs.version.outputs.version }}"
           ARGS=(--version "$VERSION" --repo "$GITHUB_REPOSITORY" --arch "${{ matrix.arch }}")
           if [ -z "${{ steps.cert.outputs.sign }}" ]; then
             ARGS+=(--no-sign)
@@ -76,18 +129,31 @@ jobs:
           path: build/Job-Search-*.dmg
 
   release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build]
+    if: needs.version.outputs.release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dmgs
           merge-multiple: true
-      - name: Attach to the release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          SINCE: ${{ needs.version.outputs.since }}
         run: |
-          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
-            gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "Job Search ${GITHUB_REF_NAME#v}" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" dmgs/*.dmg -R "$GITHUB_REPOSITORY" --clobber
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            {
+              echo "The latest Job Search${SINCE:+, with everything changed since $SINCE}."
+              echo
+              echo "**Download:** \`Job-Search-${TAG#v}-arm64.dmg\` for Apple silicon (M1 and later), \`Job-Search-${TAG#v}-x86_64.dmg\` for Intel."
+              echo
+              echo "**Already have it?** Quit Job Search, open the new DMG and drag the app into Applications to replace the old one. Your profile folder (~/JobSearch) and everything in it stay as they are."
+              echo
+              echo "**New here?** Drag the app into Applications and open it. If macOS says it can't check the app, open System Settings > Privacy & Security and click Open Anyway (once). Then follow the steps in the README."
+              if [ -n "$SINCE" ]; then echo; echo "Every change: https://github.com/$GITHUB_REPOSITORY/compare/$SINCE...$TAG"; fi
+            } > notes.md
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Job Search ${TAG#v}" --notes-file notes.md
+          fi
+          gh release upload "$TAG" dmgs/*.dmg -R "$GITHUB_REPOSITORY" --clobber
