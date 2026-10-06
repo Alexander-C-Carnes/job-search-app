@@ -132,8 +132,15 @@ DMG="$BUILD/Job-Search-$VERSION-$ARCH.dmg"
 STAGE="$BUILD/dmg"; rm -rf "$STAGE"; mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-rm -f "$DMG"
-hdiutil create -quiet -volname "Job Search" -srcfolder "$STAGE" -fs HFS+ -format UDZO "$DMG"
+# hdiutil now and then fails on GitHub's Macs ("Resource busy"), so try three times and say why each failed.
+# Not -quiet: that hides hdiutil's error along with its progress.
+for try in 1 2 3; do
+  rm -f "$DMG"
+  if out=$(hdiutil create -volname "Job Search" -srcfolder "$STAGE" -fs HFS+ -format UDZO "$DMG" 2>&1); then break; fi
+  printf 'hdiutil create failed (try %s of 3):\n%s\n' "$try" "$out"
+  [ "$try" = 3 ] && exit 1
+  sleep $((try * 15))
+done
 rm -rf "$STAGE"
 [ -n "$IDENTITY" ] && codesign --force --timestamp --sign "$IDENTITY" "$DMG"
 
