@@ -36,7 +36,7 @@
     </nav>
     <div class="meta">
       <button id="run-indicator" class="pill live hidden"></button>
-      <span id="credits" class="pill" title="JobsPipe credits used"></span>
+      <button type="button" id="credits" class="pill pill-btn" title="JobsPipe credits used: click for the ledger"></button>
       <span id="backend" class="pill subtle"></span>
       <button role="tab" data-tab="profile" id="profile-btn" class="profile-btn" type="button" title="Profile" aria-label="Profile"><span class="ico" data-icon="person"></span></button>
       <button id="look-btn" class="icon-btn" type="button" title="Change the look (in Profile)" aria-label="Change the look"><span class="ico" data-icon="palette"></span></button>
@@ -487,9 +487,20 @@
       <p class="form-error hidden"></p>
       <div class="actions">
         <button type="button" data-act="cancel" class="ghost">Cancel</button>
+        <span class="grow"></span>
+        <label class="check once-score" title="One quick Claude call per new job. Untick to only fetch the jobs (no Claude calls).">
+          <input type="checkbox" name="once_score" checked> Score what it finds</label>
+        <button type="button" data-act="once" class="ghost" title="Run this filter now, as it is, without saving it">Search once</button>
         <button class="primary">Save filter</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="credits-dialog">
+    <h2>JobsPipe credits</h2>
+    <p class="muted">One credit buys one job for the rest of the calendar month. Seeing a job again that month is free, and an empty result costs nothing.</p>
+    <div id="credits-body"></div>
+    <div class="actions"><button type="button" data-act="close" class="primary">Close</button></div>
   </dialog>
 </body>
 </html>

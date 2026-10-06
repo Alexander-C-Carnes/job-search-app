@@ -55,6 +55,8 @@ def _need_jobspipe_key() -> None:
 
 
 def _searches(cfg, args):
+    if getattr(args, "search_json", None):
+        return [config.one_off_search(json.loads(args.search_json), cfg)]
     if getattr(args, "title", None):
         base = cfg.searches[0] if cfg.searches else None
         return [adhoc_search(title=args.title, remote=args.remote, hybrid=args.hybrid,
@@ -67,6 +69,8 @@ def _searches(cfg, args):
 
 def _add_query_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--search", action="append", help="saved search id from searches.yaml (repeatable)")
+    p.add_argument("--search-json", help="one search, not saved, as JSON with searches.yaml's fields "
+                                         "(the web app's Search once); blank fields use the defaults")
     g = p.add_argument_group("ad-hoc query (instead of saved searches)")
     g.add_argument("--title", action="append", help='title phrase, e.g. "Director of Engineering" (repeatable)')
     g.add_argument("--remote", action="store_true")

@@ -1848,6 +1848,7 @@ async function loadSearches() {
   catch (e) { toast(e.message, true); }
 }
 function applySearches(d) {
+  S.requests = null;                     // the request bodies change with the filters and the defaults
   S.searches = d.searches;
   S.defaults = d.defaults;
   const ids = S.searches.map((s) => s.id);
@@ -1865,6 +1866,7 @@ function searchFacts(s) {
 }
 function renderSearches() {
   const df = S.defaults;
+  if (shownRequests.size && !S.requests) loadRequests();
   $("#search-defaults").textContent = `Defaults: ${df.country || "any country"}, posted within ${df.posted_within_days ?? "any"} days, ${df.min_salary_usd ? money(df.min_salary_usd) : "any"} pay, ${df.limit ?? 10} jobs per search.`;
   $("#searches").replaceChildren(...S.searches.map(searchCard),
     ...(S.searches.length ? [] : [h("div", { class: "notice" }, "No saved filters yet. Add one to start finding roles.")]));
@@ -1874,7 +1876,21 @@ function renderSearches() {
   $("#run-summary").replaceChildren(h("b", {}, `${picked.length} of ${S.searches.length}`), " selected · at most ",
     h("b", {}, plural(cap != null ? Math.min(max, cap) : max, "credit")), cap != null && max > cap ? ` (run cap ${cap})` : "");
 }
+// The exact JSON a filter sends to JobsPipe, shown on its card. Showing it sends nothing.
+const shownRequests = new Set();
+let requestsLoading = null;
+function loadRequests() {
+  requestsLoading = requestsLoading || api("/api/searches/requests")
+    .then((r) => { S.requests = r; })
+    .catch((e) => { toast(e.message, true); shownRequests.clear(); })
+    .finally(() => { requestsLoading = null; renderSearches(); });
+}
+function toggleRequest(id) {
+  shownRequests.has(id) ? shownRequests.delete(id) : shownRequests.add(id);
+  renderSearches();
+}
 function searchCard(s) {
+  const req = shownRequests.has(s.id) && (S.requests ? S.requests[s.id] : "Loading…");
   const pickBox = h("input", { type: "checkbox", checked: S.picked.has(s.id) });
   pickBox.addEventListener("change", () => { pickBox.checked ? S.picked.add(s.id) : S.picked.delete(s.id); renderSearches(); });
   const found = S.jobs.filter((j) => j.searches.includes(s.id)).length;
@@ -1893,8 +1909,12 @@ function searchCard(s) {
     h("div", { class: "tags" }, ...(s.titles || []).map((t) => h("span", { class: "tag" }, t))),
     h("div", { class: "facts" }, searchFacts(s)),
     (s.exclude_titles || []).length ? h("div", { class: "muted" }, "Excludes: ", s.exclude_titles.join(", ")) : null,
+    req ? h("div", { class: "req" }, h("div", { class: "hint" }, "Sent to JobsPipe as POST /v1/jobs/search, with the defaults filled in. Showing it costs nothing."),
+            h("pre", {}, typeof req === "string" ? req : JSON.stringify(req, null, 2))) : null,
     h("footer", {},
       h("span", { class: "muted" }, h("code", {}, s.id), ` · ${plural(found, "role")} found so far`),
+      h("button", { class: "link-btn small", "aria-expanded": String(shownRequests.has(s.id)), onclick: () => toggleRequest(s.id) },
+        shownRequests.has(s.id) ? "Hide request" : "Show request"),
       h("button", { class: "ghost small", onclick: () => openSearch(s, "edit") }, "Edit"),
       h("button", { class: "ghost small", onclick: () => openSearch({ ...s, name: `${s.name || s.id} (copy)` }, "new") }, "Duplicate"),
       remove));
@@ -1928,8 +1948,7 @@ function openSearch(s, mode) {
 }
 $("#add-search").addEventListener("click", () => openSearch(null, "new"));
 $("[data-act=cancel]", searchForm).addEventListener("click", () => searchDialog.close());
-searchForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
+function searchBody() {
   const body = { ...searchDialog._base, name: sField("name").value.trim() };
   for (const k of ["titles", "locations", "exclude_titles"]) body[k] = lines(sField(k).value);
   for (const k of ["min_salary_usd", "posted_within_days", "limit"]) body[k] = sField(k).value;
@@ -1937,12 +1956,28 @@ searchForm.addEventListener("submit", async (e) => {
   if (mode !== "keep") { delete body.remote; delete body.work_arrangement; }
   if (mode === "remote") body.remote = true;
   if (mode === "hybrid") body.work_arrangement = ["hybrid"];
+  return body;
+}
+searchForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = searchBody();
   const id = searchDialog._edit;
   if (!id) delete body.id;        // the server names a new search from its name
   try {
     applySearches(await (id ? put(`/api/searches/${id}`, body) : post("/api/searches", body)));
     searchDialog.close();
     toast(id ? "Filter saved." : "Filter added.");
+  } catch (err) { formError(searchForm, err.message); }
+});
+// Search once: the dialog's filter, run as it is and not saved. Its jobs land in Find jobs ("Found by one-off").
+$("[data-act=once]", searchForm).addEventListener("click", async () => {
+  const body = searchBody();
+  delete body.id;
+  formError(searchForm);
+  try {
+    const r = await post("/api/runs", { kind: "once", search: body, score: sField("once_score").checked });
+    searchDialog.close();
+    runStarted(r);
   } catch (err) { formError(searchForm, err.message); }
 });
 $$("[data-run]").forEach((b) => b.addEventListener("click", () => {
@@ -1952,6 +1987,47 @@ $$("[data-run]").forEach((b) => b.addEventListener("click", () => {
   if (kind === "preflight") startRun({ kind: "preflight", search_ids: ids });
   else startRun({ kind: "run", search_ids: ids, no_tailor: kind === "triage", top: kind === "full" ? $("#run-top").value : null });
 }));
+
+// ---- credits ledger -------------------------------------------------------------------------------
+const creditsDialog = $("#credits-dialog");
+$("#credits").addEventListener("click", openCredits);
+$("[data-act=close]", creditsDialog).addEventListener("click", () => creditsDialog.close());
+async function openCredits() {
+  $("#credits-body").replaceChildren(h("p", { class: "muted" }, spinner(), " Loading…"));
+  creditsDialog.showModal();
+  let d;
+  try { d = await api("/api/credits"); }
+  catch (e) { $("#credits-body").replaceChildren(h("p", { class: "form-error" }, e.message)); return; }
+  const stat = (n, label) => h("div", { class: "cstat" }, h("b", {}, n.toLocaleString()), h("span", { class: "muted" }, label));
+  const month = (m) => new Date(`${m}-15T12:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const charged = (c) => (c.credits_charged != null ? String(c.credits_charged)
+    : h("span", { title: "JobsPipe didn't report the charge, so every job returned is counted" }, `${c.counted ?? c.returned}*`));
+  const rows = d.calls.flatMap((c, i) => {
+    const ok = c.status === "ok";
+    const detail = h("tr", { class: "creq hidden" }, h("td", { colspan: 5 }, h("pre", {}, JSON.stringify(c.body || {}, null, 2))));
+    const toggle = h("button", { class: "link-btn small", "aria-expanded": "false", onclick: () => {
+      const open = detail.classList.toggle("hidden");
+      toggle.setAttribute("aria-expanded", String(!open));
+      toggle.textContent = open ? "Request" : "Hide";
+    } }, "Request");
+    return [h("tr", {},
+      h("td", { class: "nowrap" }, new Date(c.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })),
+      h("td", {}, c.name || c.search, " ", toggle),
+      h("td", { class: ok ? "" : "bad" }, ok ? "OK" : c.status),
+      h("td", { class: "num" }, c.returned, c.jobs_already_paid ? h("span", { class: "muted" }, ` (${c.jobs_already_paid} already yours)`) : ""),
+      h("td", { class: "num" }, charged(c))), detail];
+  });
+  $("#credits-body").replaceChildren(...[
+    h("div", { class: "cstats" }, stat(d.used, d.period === "monthly" ? "used this month" : "used"), stat(d.left, "left"),
+      stat(d.allowance, d.period === "monthly" ? "per month" : "allowance, one-time"), stat(d.per_run, "most per run")),
+    d.months.length ? h("p", { class: "cmonths" }, ...d.months.map((m, i) => [i ? " · " : "", h("b", {}, m.credits), ` in ${month(m.month)}`])) : null,
+    d.calls.length
+      ? h("div", { class: "ctable" }, h("table", {},
+          h("thead", {}, h("tr", {}, ...["When", "Filter", "Result", "Jobs", "Credits"].map((x) => h("th", {}, x)))),
+          h("tbody", {}, ...rows)))
+      : h("p", { class: "muted" }, "No searches yet."),
+    d.calls.some((c) => c.credits_charged == null && c.status === "ok") ? h("p", { class: "hint" }, "* Not reported by JobsPipe, so counted as every job returned.") : null].filter(Boolean));
+}
 
 // ---- runs ------------------------------------------------------------------------------------------
 async function startRun(body) {

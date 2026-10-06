@@ -254,6 +254,7 @@ class EvidenceCfg:
 @dataclass
 class Config:
     searches: list[Search]
+    defaults: dict[str, Any] = field(default_factory=dict)     # searches.yaml's defaults, for one-off searches
     max_credits_per_run: int = 40
     allowance_amount: int = 1000
     allowance_period: str = "once"  # "once" or "monthly"
@@ -367,6 +368,7 @@ def load(path: Optional[Path] = None) -> Config:
         auto_refresh_hours=float(su.get("auto_refresh_hours", 24) or 0))
     return Config(
         searches=[_search(s, defaults) for s in raw.get("searches") or []],
+        defaults=dict(defaults),
         max_credits_per_run=int(budget.get("max_credits_per_run", 40)),
         allowance_amount=int(allowance.get("amount", 1000)),
         allowance_period=allowance.get("period", "once"),
@@ -394,6 +396,11 @@ def load(path: Optional[Path] = None) -> Config:
                              verifier_model=ev.get("verifier_model", EvidenceCfg.verifier_model),
                              device=ev.get("device")),
     )
+
+
+def one_off_search(raw: dict, cfg: Config) -> Search:
+    """A search given in full (the web app's Search once), with searches.yaml's defaults for blank fields."""
+    return _search({**raw, "id": "one-off", "name": raw.get("name") or "Search once"}, cfg.defaults)
 
 
 def adhoc_search(*, title: list[str], remote: bool, hybrid: bool, min_salary: Optional[int],

@@ -947,6 +947,22 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     def search_requests():
         return {s.id: s.request_body() for s in config.load(searches_path).searches}
 
+    # ---- credits -------------------------------------------------------------------------------
+    @app.get("/api/credits")
+    def credits_ledger(limit: int = 200):
+        """The JobsPipe credit ledger: allowance, use by month, and the latest calls, newest first."""
+        c = store.credits()
+        used = board.credits_used(cfg.allowance_period)
+        names = {s.id: s.name for s in config.load(searches_path).searches}
+        names.update({"one-off": "Search once", "adhoc": "Command-line search"})
+        calls = [{**call, "name": names.get(call.get("search"), call.get("search"))}
+                 for call in reversed(c.get("calls", [])[-max(1, min(limit, 500)):])]
+        return {"allowance": cfg.allowance_amount, "period": cfg.allowance_period, "used": used,
+                "left": cfg.allowance_amount - used, "per_run": cfg.max_credits_per_run,
+                "lifetime": c.get("lifetime", 0),
+                "months": [{"month": m, "credits": n} for m, n in sorted(c.get("months", {}).items(), reverse=True)],
+                "calls": calls}
+
     # ---- runs ------------------------------------------------------------------------
     # A run works in a separate process, so what it produced is found by comparing each job's
     # scoring and tailoring fields before it started with the same fields once it has ended.
@@ -1010,6 +1026,19 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             if body.get("top") not in (None, ""):
                 args += ["--top", str(int(body["top"]))]
             label = "Search + triage" + ("" if body.get("no_tailor") else " + tailor")
+        elif kind == "once":
+            # Search once: a filter from the dialog, run as it is and not saved. It finds and stores jobs
+            # (in Find jobs, "Found by one-off") and, unless score is false, signal-scores the new ones.
+            try:
+                spec = searches_file.clean({**(body.get("search") or {}), "id": "one-off"})
+            except searches_file.SearchError as e:
+                raise HTTPException(400, str(e)) from None
+            spec.pop("id")
+            flags = ["--search-json", json.dumps(spec)]
+            score = body.get("score", True) is not False
+            args = ["run", "--no-tailor", *flags] if score else ["search", *flags]
+            what = ", ".join(spec["titles"])                 # what ran: the dialog may have changed a saved filter
+            label = f"Search once: {what if len(what) <= 70 else what[:67] + '…'}" + (" + score" if score else "")
         elif kind == "tailor":
             jid = str(body.get("job_id", ""))
             if not store.job(jid):

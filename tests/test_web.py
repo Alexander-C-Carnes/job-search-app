@@ -1099,6 +1099,50 @@ def test_impact_record_preview_escapes_html(env):
 
 
 
+def test_search_once_runs_the_dialogs_filter_without_saving_it(env):
+    import ast
+    c, runs, searches = env["client"], env["runs"], env["searches"]
+    before = searches.read_text()
+    spec = {"name": "Director, remote", "titles": ["Director of Engineering", ""], "remote": True, "limit": "3",
+            "min_salary_usd": "", "id": "tpm-remote"}
+    r = c.post("/api/runs", headers=H, json={"kind": "once", "search": spec})
+    assert r.status_code == 200 and r.json()["label"] == "Search once: Director of Engineering + score"
+    runs.wait(r.json()["id"])
+    args = ast.literal_eval(c.get(f"/api/runs/{r.json()['id']}", headers=H).json()["lines"][0][len("args "):])
+    assert args[:3] == ["run", "--no-tailor", "--search-json"]
+    assert json.loads(args[3]) == {"name": "Director, remote", "titles": ["Director of Engineering"], "remote": True, "limit": 3}
+    assert searches.read_text() == before                              # nothing saved
+
+    r = c.post("/api/runs", headers=H, json={"kind": "once", "search": {"titles": ["TPM"]}, "score": False})
+    runs.wait(r.json()["id"])
+    assert "'search', '--search-json'" in c.get(f"/api/runs/{r.json()['id']}", headers=H).json()["lines"][0]
+    r = c.post("/api/runs", headers=H, json={"kind": "once", "search": {"titles": []}})
+    assert r.status_code == 400 and "titles" in r.json()["detail"]
+
+
+def test_one_off_search_from_the_command_line(capsys):
+    from jobpipe import cli
+    cli.main(["show-request", "--search-json", json.dumps({"titles": ["Director of Engineering"], "limit": 3})])
+    body = json.loads(capsys.readouterr().out.split("\n", 1)[1])
+    assert body["job_title_or"] == ["Director of Engineering"] and body["limit"] == 3
+    defaults = config.load().defaults
+    assert body["min_salary_usd"] == defaults["min_salary_usd"] and body["job_title_not"] == defaults["exclude_titles"]
+
+
+def test_credit_ledger(env):
+    c = env["client"]
+    st = Store()
+    st.record_call(search_id="tpm-remote", body={"limit": 10}, charged=4, returned=6, already_paid=2, status="ok")
+    st.record_call(search_id="one-off", body={"limit": 3}, charged=None, returned=3, already_paid=None, status="ok")
+    st.record_call(search_id="gone", body={}, charged=None, returned=0, already_paid=None, status="400: bad field")
+    d = c.get("/api/credits", headers=H).json()
+    assert (d["used"], d["left"], d["allowance"]) == (7, d["allowance"] - 7, env["cfg"].allowance_amount)
+    assert [(x["name"], x["counted"]) for x in d["calls"]] == [("gone", 0), ("Search once", 3), ("TPM, remote, $200k+", 4)]
+    assert d["calls"][2]["body"] == {"limit": 10} and d["months"][0]["credits"] == 7
+    reqs = c.get("/api/searches/requests", headers=H).json()
+    assert reqs["tpm-remote"]["remote"] is True
+
+
 def test_a_job_is_tailored_by_one_process_at_a_time(tmp_path):
     from jobpipe.store import Store
     store = Store(tmp_path)
