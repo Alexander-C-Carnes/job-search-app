@@ -105,6 +105,15 @@
       showBoard(innerWidth < 900 ? ["ARRIVED", "DONE"] : ["ARRIVED   DONE"], "Done", L.words.doneWords(job), 3600);
       pop("Done");
     },
+    interviewing({ job }) {
+      showBoard(lines("NEXT STOP", "INTERVIEW", company(job)), "Interviewing", L.words.interviewingWords(job), 4600);
+      pop("Interviewing");
+    },
+    offer({ job }) {
+      showBoard(lines("TERMINUS", "OFFER", company(job)), "Offer", L.words.offerWords(job), 6400);
+      pop("Offer");
+      L.confetti(innerWidth / 2, innerHeight / 2, ["#DDAA00", "#F4520A", "#00A862", "#0066CC", "#F3A9BB", "#FFFFFF"], { count: 220, spread: 1.6 });
+    },
     denied({ job, counts }) {
       const n = counts.inPlay || 0;
       L.catCard({ svg: CAT, cls: "transit",

@@ -11,6 +11,9 @@ status works at once and offline. The Notion tracker is a synced copy:
 - A job with no URL stays local: Notion rows are matched by Job URL.
 
 When Notion can't be reached nothing is lost: the queue waits and the next sync sends it.
+
+Each row also keeps the day it reached an applied stage (Applied, Waiting, ... see APPLIED_STATUSES),
+set here or by a sync, for the dashboard's applications per day.
 """
 from __future__ import annotations
 
@@ -20,10 +23,11 @@ import sqlite3
 import threading
 import time
 from contextlib import closing
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from .notion import STATUSES, NotionTracker, TrackerEntry, merge_notes
+from .notion import APPLIED_STATUSES, STATUSES, NotionTracker, TrackerEntry, merge_notes
 from .store import canonical_url, now_iso
 
 SCHEMA = """
@@ -40,14 +44,15 @@ CREATE TABLE IF NOT EXISTS tracker (
   dirty_status INTEGER NOT NULL DEFAULT 0,   -- queued for Notion: the status was set here
   updated TEXT NOT NULL DEFAULT '',
   resume_files TEXT NOT NULL DEFAULT '[]',   -- names of the files in Notion's Resume Used
-  resume_upload TEXT                         -- queued for Notion: a PDF to set as Resume Used
+  resume_upload TEXT,                        -- queued for Notion: a PDF to set as Resume Used
+  applied TEXT NOT NULL DEFAULT ''           -- the local day (YYYY-MM-DD) the status reached an applied stage
 );
 CREATE INDEX IF NOT EXISTS tracker_url ON tracker(url_key);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 FROM_NOTION = ("page_url", "name", "company", "job_url", "fit", "notes", "priority", "due", "resume_files")
 # Columns added after the first release, for tracker.db files made before them.
-ADDED = {"resume_files": "TEXT NOT NULL DEFAULT '[]'", "resume_upload": "TEXT"}
+ADDED = {"resume_files": "TEXT NOT NULL DEFAULT '[]'", "resume_upload": "TEXT", "applied": "TEXT NOT NULL DEFAULT ''"}
 
 
 class LocalTracker:
@@ -62,6 +67,12 @@ class LocalTracker:
             for col, decl in ADDED.items():
                 if col not in have:
                     con.execute(f"ALTER TABLE tracker ADD COLUMN {col} {decl}")
+                    if col == "applied":
+                        # Rows applied to before this column: the day the row last changed is the best guess.
+                        con.executemany("UPDATE tracker SET applied = ? WHERE id = ?", [
+                            (_local_day(r["updated"]), r["id"]) for r in con.execute(
+                                f"SELECT id, updated FROM tracker WHERE status IN ({','.join('?' * len(APPLIED_STATUSES))})",
+                                APPLIED_STATUSES)])
             con.execute("PRAGMA journal_mode=WAL")
         if seed is not None:
             self._seed(seed)
@@ -113,6 +124,7 @@ class LocalTracker:
                 "name": r["name"], "company": r["company"], "job_url": r["job_url"], "status": r["status"],
                 "fit": r["fit"], "notes": r["notes"], "priority": r["priority"], "due": r["due"],
                 "resume_files": json.loads(r["resume_files"] or "[]"),
+                "applied_on": _applied_on(r["status"], r["due"], r["applied"]),
                 "pending": bool(r["dirty_status"] or (r["entry"] and r["job_url"]) or r["resume_upload"])} for r in found])
         return self._cache[1]
 
@@ -134,8 +146,10 @@ class LocalTracker:
         if status not in STATUSES:
             raise ValueError(f"status must be one of {', '.join(STATUSES)}")
         with closing(self._db()) as con, con:
-            done = con.execute("UPDATE tracker SET status = ?, dirty_status = 1, updated = ? WHERE id = ?",
-                               (status, now_iso(), row_id))
+            done = con.execute("UPDATE tracker SET status = ?, dirty_status = 1, updated = ?, "
+                               "applied = CASE WHEN ? THEN CASE WHEN applied = '' THEN ? ELSE applied END ELSE '' END "
+                               "WHERE id = ?",
+                               (status, now_iso(), status in APPLIED_STATUSES, _today(), row_id))
             if not done.rowcount:
                 raise KeyError(row_id)
             self._bump(con)
@@ -244,11 +258,11 @@ class LocalTracker:
 
     def _insert_from_notion(self, con: sqlite3.Connection, r: dict) -> None:
         con.execute("INSERT INTO tracker(id, notion_page_id, page_url, name, company, job_url, url_key, status, fit, notes, "
-                    "priority, due, resume_files, updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "priority, due, resume_files, updated, applied) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (r["page_id"], r["page_id"], r.get("page_url", ""), r.get("name", ""), r.get("company", ""),
                      r.get("job_url", ""), canonical_url(r.get("job_url")), r.get("status", ""), r.get("fit"),
                      r.get("notes", ""), r.get("priority", ""), r.get("due", ""),
-                     _file_names(r.get("resume_files")), now_iso()))
+                     _file_names(r.get("resume_files")), now_iso(), _applied(r.get("status", ""), "")))
 
     def _pull(self) -> None:
         theirs = self.notion.list_jobs()
@@ -266,6 +280,7 @@ class LocalTracker:
                 values["resume_files"] = _file_names(r.get("resume_files"))
                 if not row["dirty_status"]:       # an unsent status set here wins over Notion's
                     values["status"] = r["status"]
+                    values["applied"] = _applied(r["status"], row["applied"])
                 for k in ("name", "company", "job_url"):     # an empty field in Notion doesn't blank what's known here
                     if not values[k]:
                         del values[k]
@@ -282,6 +297,32 @@ class LocalTracker:
                     f"AND notion_page_id NOT IN ({','.join('?' * len(ids))})", ids)
             if before != [tuple(r) for r in con.execute("SELECT * FROM tracker ORDER BY id")]:
                 self._bump(con)
+
+
+def _today() -> str:
+    return date.today().isoformat()
+
+
+def _local_day(iso: str) -> str:
+    """The local day of a UTC timestamp written by now_iso(), or today if there isn't one."""
+    try:
+        return datetime.fromisoformat(iso).astimezone().date().isoformat()
+    except (TypeError, ValueError):
+        return _today()
+
+
+def _applied(status: str, was: str) -> str:
+    """The applied day to keep for a row now at `status`: the day it was first seen in an applied stage."""
+    return (was or _today()) if status in APPLIED_STATUSES else ""
+
+
+def _applied_on(status: str, due: str, applied: str) -> str:
+    """The day the job was applied to, for the dashboard. Notion's Due/Submitted wins when it is set and not
+    in the future (before applying it can be a deadline); else the day the status became an applied stage."""
+    if status not in APPLIED_STATUSES:
+        return ""
+    day = (due or "")[:10]
+    return day if day and day <= _today() else applied
 
 
 def _file_names(files: Optional[list]) -> str:

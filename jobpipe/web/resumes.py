@@ -12,6 +12,10 @@ résumé only when the candidate asks for a change, so questions and discussion 
 Claude edits the markdown, never the PDF. Every proposal is re-rendered, run through
 check_resume.py and scored for posting keywords before the candidate sees it, and nothing
 replaces the current version until they accept it.
+
+The candidate can also edit by hand: on the page (the résumé drawn in the PDF's layout, each line
+click-to-edit; apply_page_edits maps the changed text back onto its markdown lines) or as the
+markdown itself. A hand edit is saved straight away as a new version, re-rendered and checked.
 """
 from __future__ import annotations
 
@@ -240,11 +244,146 @@ class ResumeWorkspace:
         self._say("note", f"Restored v{n} as v{new}.")
         return h
 
+    # ---- edits by hand ------------------------------------------------------------------
+    def save_page_edits(self, base: int, edits: list[dict]) -> dict:
+        """Save changes made on the page: [{"key": "<line>:<field>", "old": text shown, "text": new text}]."""
+        self._check_base(base)
+        md, changed = apply_page_edits(self.md(base), edits)
+        return self._save_by_hand(base, md, f"Edited on the page ({changed} change{'s' if changed != 1 else ''}).")
+
+    def save_text(self, base: int, md: str) -> dict:
+        """Save the whole résumé as edited in markdown."""
+        self._check_base(base)
+        return self._save_by_hand(base, md, "Edited as text.")
+
+    def _check_base(self, base: int) -> None:
+        if base != self.history()["current"]:
+            raise EditError("The résumé changed since you opened the editor. Reopen it and make your edit again.")
+
+    def _save_by_hand(self, base: int, md: str, changes: str) -> dict:
+        if md.strip() == self.md(base).strip():
+            raise EditError("Nothing changed.")
+        try:
+            render.render(md)
+        except Exception:  # noqa: BLE001 - any parse failure means the shape is broken
+            raise EditError("The résumé can't be laid out: keep the first three lines as # Name, "
+                            "**headline** and the contact line.") from None
+        h = self.history()
+        n = max(v["n"] for v in h["versions"]) + 1
+        md = md.rstrip("\n") + "\n"
+        (self.vdir / f"v{n}.md").write_text(md)
+        pages, _ = render.render_pdf(md, self.vdir / f"v{n}.pdf")
+        for f in ("proposal.md", "proposal.pdf"):    # a pending proposal was built on the old version
+            (self.vdir / f).unlink(missing_ok=True)
+        h["versions"].append({"n": n, "created": _now(), "source": "by hand", "instruction": "", "changes": changes,
+                              "keywords_pct": self.keyword_pct(md), "check": self.check(self.vdir / f"v{n}.md"),
+                              "pages": pages})
+        dropped = bool(h.get("proposal"))
+        h["current"], h["proposal"] = n, None
+        self._save(h)
+        self._export(n)
+        self._say("note", f"{changes[:-1]}, saved as v{n}." + (" Claude's pending proposal was discarded." if dropped else ""))
+        return {**h, "pages": pages}
+
     def _export(self, n: int) -> None:
         """Keep resume-final.md and the deliverable PDF equal to the current version."""
         shutil.copy(self.vdir / f"v{n}.md", self.run_dir / "resume-final.md")
         if self.exported_pdf:
             shutil.copy(self.vdir / f"v{n}.pdf", self.exported_pdf)
+
+
+# ---- page edits → markdown ------------------------------------------------------------------------
+# render(editable=True) tags each piece of text with its markdown line and a field naming which part
+# of the line it shows. Each field's region is the part of the raw line its text comes from.
+FIELD_RE = {
+    "name": r"^(\s*#\s+)(.*?)(\s*)$",
+    "bullet": r"^(\s*-\s+)(.*?)(\s*)$",
+    "company": r"^(\s*\*\*)(.+?)(\*\*\s*\|.*)$",
+    "role": r"^(\s*\*\*.+?\*\*\s*\|\s*)(.+?)(\s*)$",
+}
+WHOLE_LINE = r"^(\s*)(.*?)(\s*)$"     # headline, contact, dates, paragraphs, a bullet's continuation lines
+REQUIRED = {"name": "name", "headline": "headline", "contact": "contact line", "company": "company", "role": "job title"}
+QUOTES = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"', "\u00a0": " "})
+
+
+def _shown(raw: str) -> str:
+    """The text render.inline() shows for a raw markdown fragment (markers dropped)."""
+    s = re.sub(r"`([^`]+)`", r"\1", raw)
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    return re.sub(r"(?<!\*)\*(?!\*)(.+?)\*", r"\1", s)
+
+
+def _norm(s: str) -> str:
+    s = re.sub(r"\s+", " ", s.translate(QUOTES)).strip()
+    return re.sub(r" ?\| ?", " | ", s)
+
+
+def _align(raw: str, shown: str) -> Optional[list[int]]:
+    """For each character of `shown` (plus its end), the index in `raw` it comes from. Markdown
+    markers and spacing differences are skipped; None if the two don't line up."""
+    pos, i = [], 0
+    for ch in shown:
+        while i < len(raw) and raw[i].translate(QUOTES) != ch and (raw[i] in "*`" or raw[i].isspace()):
+            i += 1
+        if i < len(raw) and raw[i].translate(QUOTES) == ch:
+            pos.append(i)
+            i += 1
+        elif ch.isspace():
+            pos.append(i)
+        else:
+            return None
+    end = pos[-1] + 1 if pos else 0
+    return pos + [end]
+
+
+def _patch(raw: str, old: str, new: str) -> str:
+    """Apply the change old -> new (both as shown) to the raw fragment, keeping markdown markers the
+    edit doesn't touch. Falls back to the plain new text when the markers can't be kept."""
+    pos = _align(raw, old)
+    if pos is None or not old:
+        return new
+    out = raw
+    ops = difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes()
+    for tag, i1, i2, j1, j2 in reversed(ops):
+        if tag == "equal":
+            continue
+        a, b = (pos[i1], pos[i2 - 1] + 1) if i2 > i1 else (pos[i1], pos[i1])
+        out = out[:a] + new[j1:j2] + out[b:]
+    return out if _norm(_shown(out)) == new else new
+
+
+def apply_page_edits(md: str, edits: list[dict]) -> tuple[str, int]:
+    """Apply page edits to the markdown. Returns (new markdown, number of fields changed).
+    Emptying a bullet, paragraph or date line deletes it (a bullet with its continuation lines)."""
+    lines = md.split("\n")
+    gone: set[int] = set()
+    changed = 0
+    # role before company: the role's region sits after the company's on the same line
+    order = {"role": 0, "company": 1}
+    for e in sorted(edits, key=lambda e: order.get(str(e.get("key", "")).partition(":")[2], 2)):
+        line_s, _, field = str(e.get("key", "")).partition(":")
+        if not line_s.isdigit() or int(line_s) >= len(lines):
+            raise EditError("That edit points past the end of the résumé; reopen the editor.")
+        n = int(line_s)
+        old, new = _norm(e.get("old", "")), _norm(e.get("text", ""))
+        if old == new:
+            continue
+        m = re.match(FIELD_RE.get(field, WHOLE_LINE), lines[n])
+        if not m or _norm(_shown(m.group(2))) != old:
+            raise EditError(f"Line {n + 1} of the résumé changed since the editor opened; reopen it.")
+        changed += 1
+        if not new:
+            if field in REQUIRED:
+                raise EditError(f"The {REQUIRED[field]} can't be empty.")
+            gone.add(n)
+            if field == "bullet":
+                k = n + 1
+                while k < len(lines) and lines[k].startswith(" ") and lines[k].strip() and not lines[k].lstrip().startswith("- "):
+                    gone.add(k)
+                    k += 1
+            continue
+        lines[n] = lines[n][:m.start(2)] + _patch(m.group(2), old, new) + lines[n][m.end(2):]
+    return "\n".join(l for k, l in enumerate(lines) if k not in gone), changed
 
 
 def diff(old: str, new: str) -> list[dict]:

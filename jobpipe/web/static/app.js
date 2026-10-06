@@ -55,6 +55,10 @@ const ICONS = {
   star: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.4l2.35 4.76 5.25.77-3.8 3.7.9 5.23L10 14.39l-4.7 2.47.9-5.23-3.8-3.7 5.25-.77z"/></svg>',
   person: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.1"/><path d="M3.8 16.8c.7-3 3.2-4.6 6.2-4.6s5.5 1.6 6.2 4.6"/></svg>',
   close: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>',
+  up: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 12.5L10 8l4.5 4.5"/></svg>',
+  down: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 7.5L10 12l4.5-4.5"/></svg>',
+  left: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5.5L8 10l4.5 4.5"/></svg>',
+  right: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5.5L12 10l-4.5 4.5"/></svg>',
   palette: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 0 0 15c1.3 0 1.9-.8 1.9-1.6 0-.9-.6-1.2-.6-2 0-.9.7-1.4 1.6-1.4h1.4c1.8 0 3.2-1.3 3.2-3.1C17.5 5.6 14.1 2.5 10 2.5z"/><circle cx="6.5" cy="9" r="1.1"/><circle cx="9" cy="5.8" r="1.1"/><circle cx="13" cy="6.2" r="1.1"/></svg>',
 };
 function icon(name) {
@@ -87,12 +91,15 @@ function formError(form, msg) {
 }
 
 // ---- app state -------------------------------------------------------------------------
-const STAGES = ["Not started", "In progress", "Blocked", "Applied", "Denied", "Done", "Not Applying"];
+const STAGES = ["Not started", "In progress", "Blocked", "Applied", "Waiting", "Interviewing", "Offer", "Denied", "Done", "Not Applying"];
+// The stages that mean the application was sent (APPLIED_STATUSES in jobpipe/notion.py).
+const APPLIED_STAGES = ["Applied", "Waiting", "Interviewing", "Offer", "Denied", "Done"];
 // The main line, in order, and the exits off it: how the stage strip and a role's stage path draw them.
-const PATH = ["Not started", "In progress", "Applied", "Done"];
+const PATH = ["Not started", "In progress", "Applied", "Waiting", "Interviewing", "Offer", "Done"];
 const EXITS = ["Blocked", "Denied", "Not Applying"];
 const STAGE_BLURB = { "Not started": "Tracked, nothing done yet", "In progress": "Scoring or tailoring the résumé", Blocked: "Waiting on something",
-                      Applied: "Application sent", Denied: "They said no", Done: "Interviews finished or closed out", "Not Applying": "Ruled out" };
+                      Applied: "Application sent", Waiting: "Heard back, waiting on the next step", Interviewing: "In interviews",
+                      Offer: "They made an offer", Denied: "They said no", Done: "Interviews finished or closed out", "Not Applying": "Ruled out" };
 // The two job lists: what's in the tracker, and what the searches found that isn't tracked yet.
 // The tracker is kept on this Mac (tracker_id); Notion is its synced copy (notion_page_id, once the row is there).
 const SCOPES = {
@@ -106,7 +113,7 @@ const prefs = (() => {
   try { return JSON.parse(localStorage.getItem("jobpipe-ui") || "{}"); } catch (_) { return {}; }
 })();
 function savePrefs() {
-  try { localStorage.setItem("jobpipe-ui", JSON.stringify({ view: S.view, sort: S.sort, group: S.group, collapsed: [...S.collapsed], docViews: S.docViews })); }
+  try { localStorage.setItem("jobpipe-ui", JSON.stringify({ view: S.view, sort: S.sort, group: S.group, collapsed: [...S.collapsed], docViews: S.docViews, dashRange: S.dashRange, fold: S.fold })); }
   catch (_) { /* optional */ }
 }
 const S = { jobs: [], byId: new Map(), etag: null, notion: false, syncing: false, notionError: "",
@@ -115,25 +122,29 @@ const S = { jobs: [], byId: new Map(), etag: null, notion: false, syncing: false
             view: prefs.view === "board" ? "board" : "list", boardAll: new Set(),
             group: prefs.group === "company" ? "company" : "", collapsed: new Set(Array.isArray(prefs.collapsed) ? prefs.collapsed : []),
             scope: "tracker", sel: { tracker: null, find: null }, findFilter: "new",
+            // Folded parts of the jobs tab, so the selected role (above all its résumé) gets the room.
+            fold: { filters: !!prefs.fold?.filters, list: !!prefs.fold?.list, head: !!prefs.fold?.head },
             selected: null, drawer: false, detailTab: "resume", detailTabJob: null, details: new Map(), scoring: new Map(), scoreErrors: new Map(), scoreFinished: null, picks: new Set(),
             summary: null, searches: [], defaults: {}, picked: null, runId: null, runSince: 0, tab: "tracker",
+            dashRange: ["14", "30", "all"].includes(prefs.dashRange) ? prefs.dashRange : "30",
             docViews: Object.fromEntries(["impact", "prep"].map((k) => {
               const v = prefs.docViews?.[k] ?? (k === "impact" ? prefs.impactView : null);   // impactView: before Interview prep
               return [k, ["formatted", "edit", "split"].includes(v) ? v : "formatted"];
             })) };
 
 // ---- tabs --------------------------------------------------------------------------------
-$$(".tabs button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+$$(".topbar [data-tab]").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 function showTab(name) {
   if (S.tab in DOCS && name !== S.tab) DOCS[S.tab].save();
   S.tab = name;
-  $$(".tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  $$(".topbar [data-tab]").forEach((b) => { b.classList.toggle("active", b.dataset.tab === name); b.setAttribute("aria-selected", String(b.dataset.tab === name)); });
   const panel = name in SCOPES ? "jobs" : name;
   $$(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${panel}`));
   if (name in SCOPES) setScope(name);
   if (name === "searches") loadSearches();
   if (name === "startups") loadStartups();
   if (name === "runs") loadRuns();
+  if (name === "dashboard") renderDashboard();
   if (name === "notes") loadNotes();
   if (name in DOCS) DOCS[name].load();
   if (name === "profile") { loadProfile(); loadAI(); }
@@ -177,8 +188,8 @@ const stageOf = (j) => j.status || "Not started";
 function stageCounts() {
   const tracked = S.jobs.filter((j) => SCOPES.tracker.has(j));
   const n = (...st) => tracked.filter((j) => st.includes(stageOf(j))).length;
-  return { out: n("Applied", "Denied", "Done"), inPlay: n("Not started", "In progress", "Blocked", "Applied"),
-           applied: n("Applied"), done: n("Done"), denied: n("Denied") };
+  return { out: n(...APPLIED_STAGES), inPlay: n("Not started", "In progress", "Blocked", "Applied", "Waiting", "Interviewing", "Offer"),
+           applied: n("Applied"), done: n("Done"), denied: n("Denied"), interviewing: n("Interviewing"), offer: n("Offer") };
 }
 function indexJob(j) {
   j._hay = [j.title, j.company, j.location, j.mode, j.status, j.one_line, j.referral_name, j.funding?.line, j.funding?.stage, ...j.searches].join(" ").toLowerCase();
@@ -226,6 +237,7 @@ function applyJobs(data) {
     renderDetail();
   } else if (cur) renderDetailHead();
   if (S.tab === "searches") renderSearches();
+  if (S.tab === "dashboard") renderDashboard();
 }
 function renderSync() {
   const el = $("#sync-state");
@@ -384,8 +396,251 @@ function setView(view) {
   applyLayout();
   renderJobs();
 }
+
+// ---- jobs: folding -------------------------------------------------------------------------------
+// Three parts fold on their own so the selected role, and above all its résumé and the chat, get the room:
+// the filters to one strip, the list to a rail of scores, the role's header to one line.
+const FOLDS = ["filters", "list", "head"];
+const FLAG_NAMES = { starred: "Starred", referral: "Has referral", remote: "Remote", tailored: "Tailored", startup: "Startup" };
+const allFolded = () => FOLDS.every((k) => S.fold[k]);
+function applyFolds() {
+  const tab = $("#tab-jobs");
+  for (const k of FOLDS) tab.classList.toggle(`fold-${k}`, S.fold[k]);
+  $("#fold-filters").setAttribute("aria-expanded", String(!S.fold.filters));
+  $("#fold-list").setAttribute("aria-expanded", String(!S.fold.list));
+  $$(".fold-all").forEach((b) => { b.replaceChildren(icon(allFolded() ? "down" : "up"), allFolded() ? "Unfold everything" : "Fold everything"); });
+  renderFoldStrip();
+  renderRail();
+  renderDetailHead();
+}
+function setFold(key, on) {
+  S.fold[key] = on;
+  savePrefs();
+  applyFolds();
+}
+function foldAll() {
+  const on = !allFolded();
+  for (const k of FOLDS) S.fold[k] = on;
+  savePrefs();
+  applyFolds();
+}
+const foldAllButton = () => h("button", { class: "ghost small fold-all", title: "Fold the filters, the list and this header (⌘\\)",
+  onclick: foldAll }, icon(allFolded() ? "down" : "up"), allFolded() ? "Unfold everything" : "Fold everything");
+// The filters, folded: the stage counts as small buttons that still filter, and what's showing.
+function renderFoldStrip() {
+  const strip = $("#fold-strip");
+  if (!S.fold.filters) { strip.replaceChildren(); return; }
+  const minis = S.scope === "tracker"
+    ? [...PATH, ...EXITS].map((s) => {
+        const b = $(`#stages .stage[data-stage="${s}"]`);
+        const n = b ? $(".n", b).textContent : "0";
+        return h("button", { class: "mini-stage", "data-stage": s, "data-kind": PATH.includes(s) ? "path" : "side",
+          "aria-pressed": String(S.stages.has(s)), title: `${s}: ${n}. Click to show only these roles.`, onclick: () => b?.click() }, n);
+      })
+    : $$("#find-seg button").map((b) => h("button", { class: "chip", "aria-pressed": String(b.classList.contains("active")), onclick: () => b.click() },
+        b.firstChild.textContent.trim(), " ", h("b", {}, $("b", b)?.textContent ?? "")));
+  const showing = [...(S.scope === "tracker" ? [...S.stages] : []), ...[...S.flags].map((f) => FLAG_NAMES[f]),
+                   ...(S.query.trim() ? [`“${S.query.trim()}”`] : [])];
+  strip.replaceChildren(
+    h("button", { class: "ghost small fold-open", "aria-expanded": "false", title: "Show the search and filters", onclick: () => setFold("filters", false) },
+      icon("down"), "Filters"),
+    h("div", { class: "minis", role: "group", "aria-label": S.scope === "tracker" ? "Filter by stage" : "Filter new roles" }, ...minis),
+    h("span", { class: "fold-what" }, showing.length ? ["Showing ", h("b", {}, showing.join(", ")), " · "] : "",
+      `${S.visible.length} of ${plural(S.jobs.filter((j) => SCOPES[S.scope].has(j)).length, "role")}`,
+      filtersOn() ? [" · ", h("button", { class: "link-btn", onclick: clearFilters }, "Clear filters")] : ""),
+    h("button", { class: "ghost small fold-search", title: "Search (/)", onclick: () => { setFold("filters", false); $("#job-filter").focus(); } },
+      "Search ", h("kbd", {}, "/")));
+}
+// The list, folded: each shown role as its score, under its company when grouped. Hover for the title.
+function renderRail() {
+  const box = $("#rail-jobs");
+  if (!S.fold.list || boardMode()) { box.replaceChildren(); return; }
+  const items = [];
+  let last = null;
+  for (const j of S.visible) {
+    if (S.group && companyKey(j) !== last) {
+      last = companyKey(j);
+      items.push(h("div", { class: "rail-co", title: j.company || "No company" }, j.company || "—"));
+    }
+    const tile = fitTile(j);
+    tile.removeAttribute("title");
+    items.push(h("button", { class: "rail-job" + (j.id === S.selected ? " selected" : ""), "data-id": j.id, "data-stage": stageOf(j),
+      title: [j.title, [j.company, j.status].filter(Boolean).join(" · ")].filter(Boolean).join("\n"), onclick: () => selectJob(j.id, true) }, tile));
+  }
+  box.replaceChildren(...items);
+}
+$("#fold-filters").addEventListener("click", () => setFold("filters", true));
+$("#fold-list").addEventListener("click", () => setFold("list", true));
+$("#unfold-list").addEventListener("click", () => setFold("list", false));
+
 $("#run-searches").addEventListener("click", () => showTab("searches"));
 $("#refresh-jobs").addEventListener("click", () => loadJobs({ refresh: true, announce: true }));
+
+// ---- dashboard -------------------------------------------------------------------------------
+// Counted from the tracked jobs on screen. applied_on is the day a job reached an applied stage, or its
+// Due/Submitted day in Notion (see _applied_on in jobpipe/tracker.py).
+const DASH_STAGES = [["In progress", "In progress"], ["Applied", "Applied"], ["Waiting", "Waiting"],
+                     ["Interviewing", "Interviewing"], ["Offer", "Offer"], ["Denied", "Rejected"]];
+const DASH_RANGES = [["14", "14 days"], ["30", "30 days"], ["all", "All"]];
+const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const keyDate = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+const longDay = (k) => keyDate(k).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+const jobLine = (j) => (j.company && !j.title.includes(j.company) ? `${j.title} — ${j.company}` : j.title);
+
+function renderDashboard() {
+  const root = $("#dash");
+  if (!S.loaded) { root.replaceChildren(h("p", { class: "dash-empty" }, "Loading the tracker…")); return; }
+  const tracked = S.jobs.filter((j) => j.tracker_id);
+  const applied = tracked.filter((j) => APPLIED_STAGES.includes(stageOf(j)));
+  const now = new Date();
+  const ago = (n) => dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n));
+  const today = ago(0);
+  const lastWeek = applied.filter((j) => j.applied_on && j.applied_on > ago(7) && j.applied_on <= today).length;
+  const todayN = applied.filter((j) => j.applied_on === today).length;
+
+  const hero = h("section", { class: "card" },
+    h("div", { class: "hero-label" }, "Jobs applied to"),
+    h("div", { class: "hero-n" }, applied.length.toLocaleString()),
+    h("p", { class: "hero-sub" }, h("b", {}, lastWeek), " in the last 7 days · ", h("b", {}, todayN), " today"));
+
+  const count = (st) => tracked.filter((j) => stageOf(j) === st).length;
+  const rows = DASH_STAGES.map(([st, label]) => [st, label, count(st)]);
+  const top = Math.max(1, ...rows.map((r) => r[2]));
+  const others = ["Not started", "Blocked", "Done", "Not Applying"].map((st) => [st, count(st)]).filter(([, n]) => n);
+  const stages = h("section", { class: "card" },
+    h("div", { class: "card-head" }, h("h3", {}, "By stage")),
+    h("ul", { class: "stage-bars" }, ...rows.map(([st, label, n]) => {
+      const bar = h("span", { class: "bar" + (n ? "" : " zero") });
+      bar.style.width = `calc((100% - 36px) * ${n / top})`;
+      return h("li", {}, h("button", { "data-stage": st, title: `Show ${label} jobs in the Tracker`,
+        "aria-label": `${label}: ${n}. Show them in the Tracker`,
+        onclick: () => { S.stages = new Set([st]); showTab("tracker"); } },
+        h("span", { class: "l" }, label), h("span", { class: "track" }, bar, h("span", { class: "v" }, n))));
+    })),
+    others.length > 0 && h("p", { class: "dash-foot" }, "Also in the tracker: ",
+      others.map(([st, n]) => `${n} ${st}`).join(" · "), others.some(([st]) => st === "Done") ? ". Done counts as applied." : "."));
+
+  root.replaceChildren(hero, stages, perDayCard(applied, today));
+}
+
+function perDayCard(applied, today) {
+  const dated = applied.filter((j) => j.applied_on && j.applied_on <= today);
+  const undated = applied.length - dated.length;
+  const seg = h("div", { class: "seg", role: "group", "aria-label": "Range" }, ...DASH_RANGES.map(([k, label]) =>
+    h("button", { class: S.dashRange === k ? "active" : "", "aria-pressed": String(S.dashRange === k),
+      onclick: () => { S.dashRange = k; savePrefs(); renderDashboard(); } }, label)));
+  const card = h("section", { class: "card wide" },
+    h("div", { class: "card-head" }, h("h3", {}, "Applications per day"), seg));
+  if (!dated.length) {
+    card.append(h("p", { class: "dash-empty" }, "No applications with a date yet. Mark a job Applied in the Tracker and it shows here."));
+    return card;
+  }
+  const by = new Map();
+  for (const j of dated) {
+    if (!by.has(j.applied_on)) by.set(j.applied_on, []);
+    by.get(j.applied_on).push(j);
+  }
+  const end = keyDate(today);
+  const start = S.dashRange === "all"
+    ? keyDate(dated.reduce((m, j) => (j.applied_on < m ? j.applied_on : m), today))
+    : new Date(end.getFullYear(), end.getMonth(), end.getDate() - Number(S.dashRange) + 1);
+  const days = [];
+  for (const d = start; d <= end; d.setDate(d.getDate() + 1)) days.push({ key: dayKey(d), jobs: by.get(dayKey(d)) || [] });
+
+  const chart = h("div", { class: "day-chart" });
+  card.append(chart);
+  requestAnimationFrame(() => drawDays(chart, days));
+  const shown = days.filter((d) => d.jobs.length).reverse();
+  const total = shown.reduce((n, d) => n + d.jobs.length, 0);
+  const before = dated.length - total;
+  card.append(h("p", { class: "dash-foot" }, `${plural(total, "application")} in ${plural(days.length, "day")}`,
+    before ? ` · ${before} earlier` : "",
+    undated ? ` · ${undated} applied ${undated === 1 ? "job has" : "jobs have"} no date, so ${undated === 1 ? "it isn't" : "they aren't"} charted` : ""));
+  card.append(h("details", { class: "dash-table" }, h("summary", {}, "Show as a table"),
+    h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Day"), h("th", {}, "Applied"), h("th", {}, "Jobs"))),
+      h("tbody", {}, ...shown.map((d) => h("tr", {}, h("td", {}, longDay(d.key)), h("td", { class: "n" }, d.jobs.length),
+        h("td", {}, d.jobs.map(jobLine).join("; "))))))));
+  return card;
+}
+
+// One column per day, drawn to the card's width: hairline grid, the busiest day labeled, the rest on hover or focus.
+function drawDays(box, days) {
+  const svg = (tag, attrs = {}) => {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  };
+  const W = Math.max(280, box.clientWidth || 800), H = 220;
+  const L = 30, R = 6, T = 20, B = 24;
+  const pw = W - L - R, ph = H - T - B, y0 = T + ph;
+  const peak = Math.max(...days.map((d) => d.jobs.length));
+  const step = Math.max(1, Math.ceil(peak / 4));
+  const yTop = Math.max(step, Math.ceil(peak / step) * step);
+  const y = (n) => y0 - (n / yTop) * ph;
+  const band = pw / days.length;
+  const cw = Math.max(2, Math.min(24, band - 2, band * 0.72));
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img",
+    "aria-label": `Applications per day, ${longDay(days[0].key)} to ${longDay(days[days.length - 1].key)}, at most ${peak} a day` });
+  const grid = svg("g", { class: "grid" }), axis = svg("g", { class: "axis" }), marks = svg("g"), hits = svg("g");
+  for (let v = 0; v <= yTop; v += step) {
+    grid.append(svg("line", { x1: L, x2: W - R, y1: y(v), y2: y(v) }));
+    const t = svg("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" });
+    t.textContent = v;
+    axis.append(t);
+  }
+  const every = Math.max(1, Math.ceil(64 / band));      // date labels at least 64px apart, ending on today
+  const peakAt = days.findIndex((d) => d.jobs.length === peak);
+  const tip = h("div", { class: "dash-tip hidden", role: "status" });
+  days.forEach((d, i) => {
+    const n = d.jobs.length, cx = L + band * i + band / 2, x = cx - cw / 2;
+    if (n) {
+      const top = y(n), r = Math.min(4, cw / 2, y0 - top);
+      marks.append(svg("path", { class: "col",
+        d: `M${x},${y0}V${top + r}Q${x},${top} ${x + r},${top}H${x + cw - r}Q${x + cw},${top} ${x + cw},${top + r}V${y0}Z` }));
+    }
+    if (i === peakAt && peak) {
+      const t = svg("text", { class: "cap", x: cx, y: y(n) - 6 });
+      t.textContent = n;
+      marks.append(t);
+    }
+    if ((days.length - 1 - i) % every === 0) {
+      const t = svg("text", { x: cx, y: H - 6, "text-anchor": "middle" });
+      t.textContent = fmtDate(keyDate(d.key));
+      axis.append(t);
+    }
+    const hit = svg("rect", { class: "hit", x: L + band * i, y: T, width: band, height: ph, tabindex: "0",
+      "aria-label": `${longDay(d.key)}: ${plural(n, "application")}` });
+    const show = () => {
+      const names = d.jobs.slice(0, 4).map((j) => h("li", {}, jobLine(j)));
+      tip.replaceChildren(h("div", { class: "tv" }, plural(n, "application")), h("div", { class: "td" }, longDay(d.key)));
+      if (names.length) tip.append(h("ul", {}, ...names, d.jobs.length > 4 && h("li", {}, `and ${d.jobs.length - 4} more`)));
+      tip.classList.remove("hidden");
+      const k = box.clientWidth / W, tw = tip.offsetWidth, above = y(n) * k - tip.offsetHeight - 10;
+      if (above >= 0) {          // over the column, else beside it so the column stays in view
+        tip.style.left = `${Math.min(Math.max(0, cx * k - tw / 2), box.clientWidth - tw)}px`;
+        tip.style.top = `${above}px`;
+      } else {
+        const right = (cx + band / 2) * k + 6;
+        tip.style.left = `${right + tw <= box.clientWidth ? right : Math.max(0, (cx - band / 2) * k - tw - 6)}px`;
+        tip.style.top = "0px";
+      }
+    };
+    const hide = () => tip.classList.add("hidden");
+    hit.addEventListener("pointerenter", show);
+    hit.addEventListener("focus", show);
+    hit.addEventListener("pointerleave", hide);
+    hit.addEventListener("blur", hide);
+    hits.append(hit);
+  });
+  grid.append(svg("line", { x1: L, x2: W - R, y1: y0, y2: y0 }));
+  root.append(grid, marks, axis, hits);
+  box.replaceChildren(root, tip);
+}
+let dashResize;
+window.addEventListener("resize", () => {
+  clearTimeout(dashResize);
+  dashResize = setTimeout(() => { if (S.tab === "dashboard") renderDashboard(); }, 120);
+});
 
 // ---- jobs: list and board ----------------------------------------------------------------------
 function renderJobs() {
@@ -401,6 +656,8 @@ function renderJobs() {
   if (boardMode()) renderBoard(list);
   else renderList(list);
   renderBatch();
+  renderFoldStrip();
+  renderRail();
 }
 
 // ---- jobs: scoring (signal = one quick call; full = every requirement rated) ---------------------
@@ -453,10 +710,12 @@ function renderBatch() {
     queued ? ` (${queued} waiting)` : "", queued ? h("button", { class: "link-btn", title: "Jobs already being scored will finish",
       onclick: async () => { try { applyScoring(await post("/api/score/cancel")); } catch (e) { toast(e.message, true); } } }, "Stop the rest") : null));
   if (picked.length) {
-    const ok = picked.filter(canScore), full = ok.filter((j) => !j.tailored);
+    const ok = picked.filter(canScore), full = ok.filter((j) => !j.tailored), sig = ok.filter((j) => j.impact_score == null);
     parts.push(h("span", {}, h("b", {}, picked.length), " selected"),
-      h("button", { class: "ghost small", disabled: !ok.length, title: "One quick Claude call per job",
-        onclick: () => scoreJobs(ok.map((j) => j.id), "signal") }, "Signal score"),
+      ...(S.scope === "find" ? [h("button", { class: "primary small", title: "Adds them to your tracker as Not started. You stay here.",
+        onclick: () => trackJobs(picked.map((j) => j.id)) }, "Track")] : []),
+      h("button", { class: "ghost small", disabled: !sig.length, title: "One quick Claude call per job (skips roles with a full score)",
+        onclick: () => scoreJobs(sig.map((j) => j.id), "signal") }, "Signal score"),
       h("button", { class: "ghost small", disabled: !full.length, title: "Rates every requirement: about four Claude calls and a few minutes per job",
         onclick: () => scoreJobs(full.map((j) => j.id), "full") }, "Full score"),
       h("button", { class: "link-btn", onclick: () => { S.picks.clear(); renderJobs(); } }, "Clear"));
@@ -490,7 +749,7 @@ const fitTile = (j, cls = "") => h("div", { class: `fit ${fitClass(score(j))} ${
   title: S.scoring.has(j.id) ? "Scoring…" : j.impact_score != null ? "Full score, out of 10" : j.fit != null ? "Signal score, out of 10" : "Not scored yet" },
   S.scoring.has(j.id) ? spinner() : score(j) ?? "–");
 // Applied to, with no record of the résumé that was sent.
-const SENT_STAGES = ["Applied", "Denied", "Done"];
+const SENT_STAGES = APPLIED_STAGES;
 const showsSent = (j) => !!j.tracker_id && (SENT_STAGES.includes(j.status) || !!j.sent_resume);
 const noSent = (j) => !!j.tracker_id && SENT_STAGES.includes(j.status) && !j.sent_resume;
 const noSentTag = (j) => noSent(j) && h("span", { class: "tag warn-tag", title: "Add the résumé you sent in its Sent résumé tab." }, "No résumé on file");
@@ -687,6 +946,8 @@ function selectJob(id, open = false) {
     j._card?.classList.toggle("selected", j.id === id);
   }
   $("#jobs-body").classList.toggle("detail-open", S.drawer);
+  $$("#rail-jobs .rail-job").forEach((b) => b.classList.toggle("selected", b.dataset.id === id));
+  $(`#rail-jobs .rail-job.selected`)?.scrollIntoView({ block: "nearest" });
   renderDetail();
   if (S.byId.get(id)?.local) loadDetail(id);
 }
@@ -709,17 +970,40 @@ async function loadDetail(id) {
   }
 }
 
+// Tracking keeps you in Find jobs, on the next role, so you can work down the list and open the Tracker after.
 async function trackJob(j) {
   window.Look?.fly(j._el || j._card, $(".tabs [data-tab=tracker]"), getComputedStyle(document.documentElement).getPropertyValue("--st-not-started"));
+  const at = S.visible.indexOf(j);
   try {
     const r = await post(`/api/jobs/${encodeURIComponent(j.id)}/track`);
     toast((r.action === "created" ? "Added to your tracker." : "Updated in your tracker.")
       + (S.notionError ? " Notion will get it when it's back." : ""));
     S.sel.tracker = j.id;
+    S.picks.delete(j.id);
     await loadJobs();
-    showTab("tracker");
+    stepPast([j.id], at);
     loadJobs({ wait: true });
   } catch (e) { toast(e.message, true); }
+}
+// The checked roles in Find jobs, tracked in one go.
+async function trackJobs(ids) {
+  const at = S.visible.findIndex((j) => ids.includes(j.id));
+  let done = 0;
+  try {
+    for (const id of ids) { await post(`/api/jobs/${encodeURIComponent(id)}/track`); done++; S.picks.delete(id); }
+  } catch (e) { toast(e.message, true); }
+  if (!done) return;
+  toast(`Added ${plural(done, "role")} to your tracker.` + (S.notionError ? " Notion will get them when it's back." : ""));
+  await loadJobs();
+  stepPast(ids, at);
+  loadJobs({ wait: true });
+}
+// After tracking, the open role left Find jobs: open the one that took its place in the list.
+function stepPast(ids, at) {
+  if (S.scope !== "find" || (S.selected && !ids.includes(S.selected))) return;
+  const next = S.visible[Math.min(Math.max(at, 0), S.visible.length - 1)];
+  if (next) { selectJob(next.id); next._el?.scrollIntoView({ block: "nearest" }); }
+  else { S.selected = null; renderDetail(); }
 }
 async function dismissJob(j, dismissed) {
   j.dismissed = dismissed;
@@ -747,7 +1031,10 @@ function quickStatus(j) {
   const go = (label, status, cls = "ghost small") => h("button", { class: `quick ${cls}`, "data-to": status, onclick: () => setStatus(j, status) }, label);
   switch (stageOf(j)) {
     case "Not started": case "In progress": case "Blocked": return [go("Mark applied", "Applied", "primary small")];
-    case "Applied": return [go("Mark done", "Done"), go("Denied", "Denied")];
+    case "Applied": return [go("Interviewing", "Interviewing", "primary small"), go("Waiting", "Waiting"), go("Denied", "Denied")];
+    case "Waiting": return [go("Interviewing", "Interviewing", "primary small"), go("Denied", "Denied")];
+    case "Interviewing": return [go("Offer", "Offer", "primary small"), go("Denied", "Denied")];
+    case "Offer": return [go("Mark done", "Done")];
     default: return [go("Back to in progress", "In progress")];
   }
 }
@@ -758,6 +1045,16 @@ function referralControl(j) {
     h("button", { class: "link-btn", onclick: () => openReferral(j) }, "Edit"));
 }
 function detailHead(j) {
+  if (S.fold.head) return h("div", { class: "dhead compact" },
+    fitTile(j),
+    h("h2", { title: [j.title, j.company].filter(Boolean).join(" · ") }, j.title || "(untitled)", j.company && h("span", { class: "sub" }, " · ", j.company)),
+    statusControl(j),
+    j.tailored ? h("span", { class: "score" }, "Résumé ", h("b", {}, j.resume_score ?? "–"), "/10 · ATS ", h("b", {}, pct(j.ats_total)))
+      : j.impact_score != null && h("span", { class: "score" }, "Full score ", h("b", {}, j.impact_score), "/10"),
+    starButton(j),
+    h("button", { class: "icon-btn fold-btn", title: "Show the details: location, referral, links and the stage path", "aria-label": "Show the details",
+      "aria-expanded": "false", onclick: () => setFold("head", false) }, icon("down")),
+    h("button", { class: "icon-btn drawer-close", title: "Close", "aria-label": "Close", onclick: closeDrawer }, icon("close")));
   return h("div", { class: "dhead" },
     h("div", { class: "dhead-top" },
       fitTile(j, "big"),
@@ -773,6 +1070,8 @@ function detailHead(j) {
         j.local && !j.tailored && j.impact_score == null && scoreButton(j.id, "full", false, true),
         j.local && !j.tailored && h("button", { class: j.tracker_id && j.impact_score != null ? "primary" : "ghost",
           onclick: () => startRun({ kind: "tailor", job_id: j.id }) }, "Tailor résumé"),
+        h("button", { class: "icon-btn fold-btn", title: "Fold this header to one line", "aria-label": "Fold the header",
+          "aria-expanded": "true", onclick: () => setFold("head", true) }, icon("up")),
         h("button", { class: "icon-btn drawer-close", title: "Close", "aria-label": "Close", onclick: closeDrawer }, icon("close")))),
     h("div", { class: "bar" },
       statusControl(j),
@@ -790,7 +1089,7 @@ function stagePath(j) {
   const exit = EXITS.includes(cur) ? cur : null;
   // An exit is taken from somewhere on the line: Denied after applying, the other two before.
   const at = exit ? PATH.indexOf(exit === "Denied" ? "Applied" : "In progress") : PATH.indexOf(cur);
-  return h("div", { class: "stage-path", "aria-label": `Status: ${cur}` },
+  return h("div", { class: "stage-path", "aria-label": `Status: ${cur}`, style: `--steps:${PATH.length}` },
     h("ol", { class: "path-line" }, ...PATH.map((s, i) => h("li", {
       class: ["step", i < at && "reached", i === at && (exit ? "reached" : "current")].filter(Boolean).join(" "),
       "data-stage": s, "aria-current": i === at && !exit ? "step" : null },
@@ -826,7 +1125,7 @@ function renderDetail() {
       : S.detailTab === "posting" ? "posting" : S.detailTab === "sent" && showsSent(j) ? "sent" : "resume";
     const tabs = [...(showsSent(j) ? [["sent", "Sent résumé"]] : []), ["resume", "Résumé"], ["posting", "Posting & score"]];
     const sub = h("div", { class: "subtabs" }, ...tabs.map(([k, label]) =>
-      h("button", { class: k === tab ? "active" : "", onclick: () => { S.detailTab = k; S.detailTabJob = j.id; renderDetail(); } }, label)));
+      h("button", { class: k === tab ? "active" : "", onclick: () => { S.detailTab = k; S.detailTabJob = j.id; renderDetail(); } }, label)), foldAllButton());
     const panel = h("div", { class: "subpanel active" });
     box.replaceChildren(head, sub, panel);
     if (tab === "sent") renderSent(j, panel);
@@ -858,7 +1157,7 @@ function renderDetail() {
     : (S.detailTab === "sent" && !showsSent(j)) || (off(S.detailTab) && fresh) ? "posting" : S.detailTab;
   const sub = h("div", { class: "subtabs" }, ...tabs.map(([k, label]) => h("button", {
     class: [k === tab && "active", off(k) && "empty"].filter(Boolean).join(" "),
-    onclick: () => { S.detailTab = k; S.detailTabJob = j.id; renderDetail(); } }, label)));
+    onclick: () => { S.detailTab = k; S.detailTabJob = j.id; renderDetail(); } }, label)), foldAllButton());
   const panel = h("div", { class: "subpanel active" });
   box.replaceChildren(head, sub, panel);
   if (tab === "sent") renderSent(j, panel);
@@ -1049,15 +1348,23 @@ function scoreError(id) {
 const BANDS = [[10, "Exact match on skills, experience and level"], [9, "Significant match, missing at most one skill"],
                [8, "Covers most of the role"], [6, "Relevant skills and experience for about 60–70% of the role"],
                [4, "Relevant skills or relevant experience, not both"], [1, "Little relevant overlap"]];
+// The signal score only says whether a role is worth a résumé; once a full score exists it replaces it.
 function scoreBlock(j, d) {
-  return h("div", { class: "scorecard" }, scoreError(d.id), fullBlock(j, d), signalBlock(j, d));
+  const full = j.tailored || d.full_score;
+  return h("div", { class: "scorecard" }, scoreError(d.id), fullBlock(j, d), full ? null : signalBlock(j, d));
 }
 function fullBlock(j, d) {
   const f = d.full_score;
   if (j.tailored) {
-    return h("div", { class: "card" }, h("h3", {}, "Full score"),
-      h("p", {}, "The tailoring run rated every requirement: impact record ", h("b", {}, j.impact_score ?? "–"), "/10, tailored résumé ",
-        h("b", {}, j.resume_score ?? "–"), "/10, ATS ", h("b", {}, pct(j.ats_total)), ". See Fit report and Heat map."));
+    const n = j.impact_score;
+    return h("div", { class: "card full-score" },
+      h("div", { class: "score-head" },
+        h("div", { class: `fit huge full ${fitClass(n)}` }, n ?? "–", h("small", {}, "/10")),
+        h("div", {},
+          h("h3", {}, "Full score"),
+          h("div", { class: "band" }, n == null ? "" : BANDS.find(([min]) => n >= min)[1]),
+          h("p", {}, "The tailoring run rated every requirement: impact record ", h("b", {}, n ?? "–"), "/10, tailored résumé ",
+            h("b", {}, j.resume_score ?? "–"), "/10, ATS ", h("b", {}, pct(j.ats_total)), ". See Fit report and Heat map."))));
   }
   if (!f) {
     return h("div", { class: "notice" }, h("h3", {}, "Full score"),
@@ -1149,7 +1456,9 @@ function renderResume(d, panel) {
   const frame = h("iframe", { src: fileUrl(`/api/jobs/${id}/resume/${r.current}.pdf`), title: "Résumé PDF" });
   versionSel.addEventListener("change", () => { frame.src = fileUrl(`/api/jobs/${id}/resume/${versionSel.value}.pdf`); });
   const pdfLink = h("a", { href: fileUrl(`/api/jobs/${id}/resume/${r.current}.pdf`), target: "_blank" }, "Open PDF ↗");
-  const pdfpane = h("div", { class: "pdfpane" }, h("div", { class: "pdfbar" }, "Version", versionSel, pdfLink), frame);
+  const editBtn = h("button", { class: "ghost small", title: "Change the wording yourself, right on the page" }, "Edit on page");
+  const pdfpane = h("div", { class: "pdfpane" }, h("div", { class: "pdfbar" }, "Version", versionSel, pdfLink, h("span", { class: "grow" }), editBtn), frame);
+  editBtn.addEventListener("click", () => openPageEditor(d, pdfpane));
 
   const editpane = h("div", { class: "editpane" });
   const cur = r.versions.find((v) => v.n === r.current);
@@ -1177,8 +1486,8 @@ function renderResume(d, panel) {
         : h("button", { class: "ghost small", onclick: async () => {
             try { await post(`/api/jobs/${id}/restore`, { n: v.n }); toast(`Restored v${v.n} as a new version.`); reloadResume(d.id); }
             catch (e) { toast(e.message, true); } } }, "Restore")))));
-  const readOnly = r.editable === false && h("div", { class: "card" }, h("h3", {}, "Editing isn't available"),
-    h("p", { class: "muted" }, "This résumé was saved without its posting and match brief, which Claude needs to check edits against. Tailor the job in the app to get an editable copy."));
+  const readOnly = r.editable === false && h("div", { class: "card" }, h("h3", {}, "Chat with Claude isn't available"),
+    h("p", { class: "muted" }, "This résumé was saved without its posting and match brief, which Claude needs to check edits against. Tailor the job in the app to get a copy Claude can edit. You can still change the wording yourself: Edit on page, above the PDF."));
   editpane.append(readOnly || askCard, proposalBox, metrics, hist);
   panel.append(h("div", { class: "resume" }, pdfpane, editpane));
 
@@ -1207,9 +1516,12 @@ function renderResume(d, panel) {
       const res = await post(`/api/jobs/${id}/edit`, { instruction: text });
       msgs = res.chat;
       showChat(msgs);
-      if (res.proposal) renderProposal(d, res.proposal, proposalBox, frame, cur);
+      if (res.proposal) {
+        renderProposal(d, res.proposal, proposalBox, frame, cur);
+        proposalBox.scrollIntoView({ block: "start" });
+      }
     } catch (e) { showChat(msgs); instr.value = text; toast(e.message, true); }
-    finally { askBtn.disabled = newBtn.disabled = false; instr.focus(); }
+    finally { askBtn.disabled = newBtn.disabled = false; instr.focus({ preventScroll: true }); }   // don't undo the scroll to a proposal
   }
   askBtn.addEventListener("click", send);
   instr.addEventListener("keydown", (e) => {
@@ -1221,6 +1533,127 @@ function renderResume(d, panel) {
     catch (e) { toast(e.message, true); }
   });
   if (r.proposal) api(`/api/jobs/${id}/edit`).then((res) => res.proposal && renderProposal(d, res.proposal, proposalBox, frame, cur));
+}
+
+// Edit on page: the current version drawn in the PDF's layout (the same CSS), every line
+// click-to-edit. Save sends only the lines that changed; the server writes them into the markdown,
+// re-renders the PDF and keeps it as a new version. "Edit as text" is the fallback for changes
+// the page can't make, such as adding a bullet or a job.
+const PAGE_PX = 96;                                  // CSS px per inch
+const plain = (t) => t.replace(/[\u00a0\s]+/g, " ").trim();
+async function openPageEditor(d, pane) {
+  const id = encodeURIComponent(d.id);
+  let pg;
+  try { pg = await api(`/api/jobs/${id}/resume/page`); }
+  catch (e) { toast(e.message, true); return; }
+  if (pg.proposal && !confirm("Claude has a proposed edit waiting. Saving a change of your own discards it. Edit anyway?")) return;
+  const before = [...pane.childNodes];
+  let mode = "page";
+  const orig = new Map();
+  const status = h("span", { class: "muted page-status" });
+  const pages = h("span", { class: "muted page-count" });
+  const modeBtn = h("button", { class: "ghost small" }, "Edit as text");
+  const cancel = h("button", { class: "ghost small" }, "Cancel");
+  const save = h("button", { class: "primary small", disabled: true }, "Save");
+  const page = h("iframe", { class: "page-editor", title: "Résumé, editable", srcdoc: pg.html });
+  const text = h("textarea", { class: "md-editor", spellcheck: "true", hidden: true, "aria-label": "Résumé markdown" });
+  text.value = pg.markdown;
+  pane.replaceChildren(h("div", { class: "pdfbar page-bar" }, h("b", {}, `Editing v${pg.n}`), status, pages,
+    h("span", { class: "grow" }), modeBtn, cancel, save), page, text);
+
+  const changed = () => [...orig].filter(([el, t]) => plain(el.textContent) !== plain(t));
+  const dirty = () => (mode === "page" ? changed().length : text.value !== pg.markdown ? 1 : 0);
+  const refresh = () => {
+    const n = dirty();
+    save.disabled = !n;
+    status.textContent = mode === "text" ? (n ? "Unsaved changes" : "The résumé's markdown. Keep its shape: # Name, **headline**, contact line, ## sections.")
+      : n ? `${n} change${n > 1 ? "s" : ""} not saved` : "Click any line to change it. Enter or Esc finishes a line.";
+  };
+  // Where the PDF's page breaks fall, roughly: the page is 11in with 0.625in margins.
+  let guideTimer;
+  const guides = () => {
+    const doc = page.contentDocument;
+    if (!doc?.body) return;
+    doc.querySelectorAll(".page-guide").forEach((g) => g.remove());
+    const top = 0.625 * PAGE_PX, per = (11 - 1.25) * PAGE_PX;
+    const content = doc.body.scrollHeight - 2 * top;
+    let k = 1;
+    for (; k * per < content; k++) {
+      const g = doc.createElement("div");
+      g.className = "page-guide";
+      g.style.top = `${top + k * per}px`;
+      g.append(Object.assign(doc.createElement("span"), { textContent: `page ${k + 1} starts about here` }));
+      doc.body.append(g);
+    }
+    pages.textContent = `≈ ${k} page${k > 1 ? "s" : ""}`;
+    pages.classList.toggle("fail", k > 2);
+  };
+  page.addEventListener("load", () => {
+    const doc = page.contentDocument;
+    orig.clear();
+    doc.querySelectorAll("[data-ed]").forEach((el) => {
+      orig.set(el, el.textContent);
+      el.addEventListener("input", () => {
+        el.classList.toggle("changed", plain(el.textContent) !== plain(orig.get(el)));
+        refresh();
+        clearTimeout(guideTimer);
+        guideTimer = setTimeout(guides, 250);
+      });
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); el.blur(); }
+      });
+      el.addEventListener("paste", (e) => {   // one line of plain text, whatever was copied
+        e.preventDefault();
+        doc.execCommand("insertText", false, plain(e.clipboardData.getData("text/plain")));
+      });
+    });
+    doc.querySelectorAll("a").forEach((a) => a.addEventListener("click", (e) => e.preventDefault()));
+    fit();
+    guides();
+    refresh();
+  });
+  // Shrink the 8.5in page to the pane's width; zoom keeps the line breaks the PDF has.
+  const fit = () => {
+    const root = page.contentDocument?.documentElement;
+    if (root) root.style.zoom = Math.min(1, (page.clientWidth - 32) / (8.5 * PAGE_PX)).toFixed(3);
+  };
+  new ResizeObserver(fit).observe(page);
+  text.addEventListener("input", refresh);
+
+  modeBtn.addEventListener("click", () => {
+    if (dirty() && !confirm("Switching discards the changes you haven't saved. Switch anyway?")) return;
+    mode = mode === "page" ? "text" : "page";
+    text.value = pg.markdown;
+    if (mode === "page") page.srcdoc = pg.html;
+    page.hidden = mode === "text";
+    text.hidden = mode === "page";
+    pages.hidden = mode === "text";
+    modeBtn.textContent = mode === "page" ? "Edit as text" : "Edit on page";
+    refresh();
+    if (mode === "text") { text.setSelectionRange(0, 0); text.focus({ preventScroll: true }); text.scrollTop = 0; }
+  });
+  cancel.addEventListener("click", () => {
+    if (dirty() && !confirm("Discard the changes you haven't saved?")) return;
+    pane.replaceChildren(...before);
+  });
+  save.addEventListener("click", async () => {
+    save.disabled = modeBtn.disabled = cancel.disabled = true;
+    status.replaceChildren(spinner(), " Saving and making the PDF…");
+    const body = mode === "page"
+      ? { base: pg.n, edits: changed().map(([el, t]) => ({ key: el.dataset.ed, old: t, text: el.textContent })) }
+      : { base: pg.n, markdown: text.value };
+    try {
+      const res = await post(`/api/jobs/${id}/resume/page`, body);
+      const check = res.versions.find((v) => v.n === res.current)?.check;
+      const warn = [res.pages > 2 && `it runs to ${res.pages} pages`, check?.passed === false && "the format check failed"].filter(Boolean);
+      toast(`Saved as v${res.current}. The deliverable PDF now matches it.` + (warn.length ? ` Note: ${warn.join(" and ")}.` : ""), warn.length > 0);
+      reloadResume(d.id);
+    } catch (e) {
+      toast(e.message, true);
+      modeBtn.disabled = cancel.disabled = false;
+      refresh();
+    }
+  });
 }
 
 // The résumé's numbers drawn to scale: fit and résumé out of 10, ATS and keywords out of 100.
@@ -2341,12 +2774,15 @@ window.addEventListener("beforeunload", (e) => {
 
 // ---- keyboard ---------------------------------------------------------------------------------------
 document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === "\\" && S.tab in SCOPES && !document.querySelector("dialog[open]")) { e.preventDefault(); foldAll(); }
+});
+document.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || document.querySelector("dialog[open]")) return;
   if (e.target.closest("input, textarea, select, [contenteditable]")) {
     if (e.key === "Escape" && e.target.id === "job-filter") e.target.blur();
     return;
   }
-  if (e.key === "/") { e.preventDefault(); showTab(S.scope); $("#job-filter").focus(); return; }
+  if (e.key === "/") { e.preventDefault(); showTab(S.scope); if (S.fold.filters) setFold("filters", false); $("#job-filter").focus(); return; }
   if (!(S.tab in SCOPES)) return;
   const j = S.byId.get(S.selected);
   if (e.key === "Escape") closeDrawer();
@@ -2368,6 +2804,7 @@ document.addEventListener("keydown", (e) => {
   $("#job-group").value = S.group;
   $$("#view-seg button").forEach((x) => x.classList.toggle("active", x.dataset.view === S.view));
   applyLayout();
+  applyFolds();
   Object.entries(DOCS).forEach(([k, d]) => d.setView(S.docViews[k]));
   await Promise.all([loadSummary(), loadJobs()]);
   setScope("tracker");

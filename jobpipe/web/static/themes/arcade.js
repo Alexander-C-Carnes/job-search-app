@@ -122,6 +122,15 @@
         panel("done", "QUEST COMPLETE", 50, words.doneWords(job), null, 2600);
         L.confetti(innerWidth / 2, innerHeight / 2 - 40, theme.confetti, { square: true, count: 60, size: 0.8, spread: 1.2 });
       },
+      interviewing({ job, anchor, theme }) {
+        panel("interviewing", "BOSS FIGHT!", 250, words.interviewingWords(job), "Interview stage unlocked. Click anywhere to carry on.", 3600);
+        L.confetti(anchor.x, anchor.y, theme.confetti, { square: true, count: 120 });
+      },
+      offer({ job, anchor, theme }) {
+        panel("offer", "YOU WIN!", 1000, words.offerWords(job), "High score. Click anywhere to carry on.", 6000);
+        L.confetti(anchor.x, anchor.y, theme.confetti, { square: true, count: 220 });
+        L.confetti(innerWidth / 2, innerHeight / 2 - 40, theme.confetti, { square: true, count: 160, spread: 1.6 });
+      },
       denied({ job, counts }) {
         close();
         const n = counts.inPlay || 0;

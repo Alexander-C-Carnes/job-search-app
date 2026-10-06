@@ -3,6 +3,7 @@ import json
 import shutil
 import sys
 import threading
+from datetime import date
 from urllib.parse import quote
 
 import httpx
@@ -466,6 +467,86 @@ def test_edit_discard_and_validation(env):
     assert c.post("/api/jobs/j2/edit", headers=H, json={"instruction": "x"}).status_code == 404
 
 
+def _page_fields(html_doc):
+    """The editable spans of render(editable=True): {key: text shown}."""
+    import html as htmllib, re
+    return {k: htmllib.unescape(re.sub(r"<[^>]+>", "", t))
+            for k, t in re.findall(r'data-ed="([^"]+)"[^>]*>(.*?)</span>', html_doc)}
+
+
+def test_edit_on_page_saves_a_new_version(env):
+    c, run_dir = env["client"], env["run_dir"]
+    pg = c.get("/api/jobs/j1/resume/page", headers=H).json()
+    assert pg["n"] == 1 and pg["markdown"] == _resume() and 'contenteditable="plaintext-only"' in pg["html"]
+    f = _page_fields(pg["html"])
+    company = next(k for k in f if k.endswith(":company"))
+    role = company.replace("company", "role")
+    bullet = next(k for k in f if k.endswith(":bullet"))
+    edits = [{"key": company, "old": f[company], "text": f[company] + " Inc."},
+             {"key": role, "old": f[role], "text": "Staff TPM, Payments"},
+             {"key": bullet, "old": f[bullet], "text": ""}]
+    before_pdf = env["pdf"].read_bytes()
+    r = c.post("/api/jobs/j1/resume/page", headers=H, json={"base": 1, "edits": edits})
+    assert r.status_code == 200, r.text
+    h = r.json()
+    assert h["current"] == 2 and h["pages"] == 2
+    v = h["versions"][-1]
+    assert v["source"] == "by hand" and v["changes"] == "Edited on the page (3 changes)."
+    md = (run_dir / "resume-final.md").read_text()
+    assert f"**{f[company]} Inc.** | Staff TPM, Payments" in md and f[bullet] not in md
+    assert env["pdf"].read_bytes() != before_pdf                       # deliverable PDF updated
+    assert "saved as v2" in c.get("/api/jobs/j1/chat", headers=H).json()["chat"][-1]["text"]
+    # an editor opened on v1 is now stale
+    assert c.post("/api/jobs/j1/resume/page", headers=H, json={"base": 1, "edits": edits}).status_code == 400
+
+
+def test_edit_as_text_and_its_checks(env):
+    c = env["client"]
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Lead with reliability"})   # a pending proposal
+    md = _resume()
+    bad = c.post("/api/jobs/j1/resume/page", headers=H, json={"base": 1, "markdown": md})
+    assert bad.status_code == 400 and "Nothing changed" in bad.json()["detail"]
+    assert c.post("/api/jobs/j1/resume/page", headers=H, json={"base": 1, "markdown": "just text"}).status_code == 400
+    r = c.post("/api/jobs/j1/resume/page", headers=H, json={"base": 1, "markdown": md.replace("9+ years", "10+ years")})
+    assert r.status_code == 200, r.text
+    assert r.json()["current"] == 2 and r.json()["proposal"] is None    # the proposal was built on v1
+    assert not (env["run_dir"] / "versions" / "proposal.md").exists()
+    assert "10+ years" in (env["run_dir"] / "resume-final.md").read_text()
+
+
+def test_page_edits_keep_markdown_the_edit_does_not_touch():
+    from jobpipe.web.resumes import EditError, apply_page_edits
+    md = ("# Jordan Rivera\n**Staff TPM | 9+ Years**\nPortland, OR|jordan@example.com\n\n## CORE SKILLS\n"
+          "**Hard Skills:** SQL, `Python`, Jira's API\n- First bullet\n  continues here\n- Second\n")
+    f = _page_fields(render.render(md, editable=True))
+    skills = next(k for k, t in f.items() if t.startswith("Hard Skills"))
+    assert f[skills] == "Hard Skills: SQL, Python, Jira’s API"          # as the page shows it
+    out, n = apply_page_edits(md, [{"key": skills, "old": f[skills], "text": "Hard Skills: SQL, Go, Python, Jira’s API"}])
+    assert n == 1 and "**Hard Skills:** SQL, Go, `Python`, Jira's API" in out
+    contact = next(k for k in f if k.endswith(":contact"))
+    out, _ = apply_page_edits(md, [{"key": contact, "old": f[contact], "text": f[contact].replace("Portland", "Seattle")}])
+    assert "Seattle, OR|jordan@example.com" in out
+    head = next(k for k in f if k.endswith(":headline"))
+    out, _ = apply_page_edits(md, [{"key": head, "old": f[head], "text": "Principal TPM | 9+ Years"}])
+    assert "**Principal TPM | 9+ Years**" in out
+    first = next(k for k, t in f.items() if t == "First bullet")
+    out, _ = apply_page_edits(md, [{"key": first, "old": "First bullet", "text": ""}])
+    assert "First bullet" not in out and "continues here" not in out and "- Second" in out
+    with pytest.raises(EditError, match="can't be empty"):
+        apply_page_edits(md, [{"key": head, "old": f[head], "text": " "}])
+    with pytest.raises(EditError, match="changed since"):
+        apply_page_edits(md, [{"key": head, "old": "something else", "text": "x"}])
+
+
+def test_editable_page_renders_like_the_pdf():
+    md = _resume()
+    plain = render.render(md)
+    page = render.render(md, editable=True)
+    assert "data-ed" not in plain and "page-guide" in page
+    import re
+    assert re.sub(r'<span data-ed="[^"]+"[^>]*>|</span>', "", page.split("</style>", 1)[1]) == plain.split("</style>", 1)[1]
+
+
 def test_chat_answers_questions_and_remembers_the_conversation(env):
     c, runner = env["client"], env["runner"]
     r = c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "What's weakest?"}).json()
@@ -671,6 +752,18 @@ def test_denied_without_marking_applied_keeps_the_resume_sent(env):
     job = jobs()["j1"]
     assert job["status"] == "Denied" and job["pending"] is False
     assert notion.rows["p1"]["properties"]["Status"]["status"]["name"] == "Denied"
+
+
+def test_interviewing_counts_as_applied_with_its_day(env):
+    c = env["client"]
+    statuses = c.get("/api/summary", headers=H).json()["statuses"]
+    assert {"Waiting", "Interviewing", "Offer"} <= set(statuses)
+    jobs = lambda: {j["id"]: j for j in c.get("/api/jobs?wait=1", headers=H).json()["jobs"]}
+    assert jobs()["j1"]["applied_on"] == ""
+    # straight to Interviewing: it was sent, so the résumé is kept and the day it was applied to is today
+    assert c.post("/api/tracker/p1/status", headers=H, json={"status": "Interviewing"}).json() == {"ok": True}
+    assert c.get("/api/jobs/j1/sent", headers=H).json()["sent"]["note"] == "v1"
+    assert jobs()["j1"]["applied_on"] == date.today().isoformat()
 
 
 def test_runs_side_by_side(env):

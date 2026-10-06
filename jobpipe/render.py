@@ -78,11 +78,35 @@ def contact_html(s):
 ROLE_SECTIONS = ("PROFESSIONAL EXPERIENCE", "EXPERIENCE", "ADDITIONAL EXPERIENCE")
 
 
-def render(md):
+# The page editor (option `editable`): every piece of text the candidate can change is wrapped in a
+# span that names its markdown line and which part of that line it is. Saving maps each changed
+# span back onto that line (jobpipe/web/resumes.py, apply_page_edits).
+EDIT_CSS = """
+html { background: #e6e6e6; }
+body { width: 8.5in; margin: 24px auto; padding: 0.625in; background: #fff; position: relative;
+       box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+[data-ed] { border-radius: 2px; outline: none; cursor: text; }
+[data-ed]:hover { background: rgba(229, 8, 21, .07); }
+[data-ed]:focus { background: #fff4c2; box-shadow: 0 0 0 1px #e0c25a; }
+[data-ed].changed { background: #fff4c2; }
+.page-guide { position: absolute; left: 0; right: 0; border-top: 1px dashed #b0b0b0; pointer-events: none; }
+.page-guide span { position: absolute; right: 6px; top: -9px; padding: 0 4px; background: #fff;
+                   font: 400 8pt -apple-system, Helvetica, sans-serif; color: #888; }
+"""
+
+
+def render(md, editable=False):
     lines = md.splitlines()
     i = 0
     body = []
     name = headline = contact = None
+    at = {}
+
+    def ed(text_html, line, field):
+        if not editable:
+            return text_html
+        return f'<span data-ed="{line}:{field}" contenteditable="plaintext-only" spellcheck="true">{text_html}</span>'
+
     # header
     while i < len(lines):
         ln = lines[i].strip()
@@ -90,15 +114,15 @@ def render(md):
         if not ln:
             continue
         if ln.startswith("# ") and name is None:
-            name = ln[2:].strip()
+            name, at["name"] = ln[2:].strip(), i - 1
         elif headline is None and ln.startswith("**"):
-            headline = ln.strip("*").strip()
+            headline, at["headline"] = ln.strip("*").strip(), i - 1
         elif contact is None:
-            contact = ln
+            contact, at["contact"] = ln, i - 1
             break
-    body.append(f'<div class="name">{inline(name)}</div>')
-    body.append(f'<div class="title">{inline(headline)}</div>')
-    body.append(f'<div class="contact">{contact_html(contact)}</div>')
+    body.append(f'<div class="name">{ed(inline(name), at.get("name"), "name")}</div>')
+    body.append(f'<div class="title">{ed(inline(headline), at.get("headline"), "headline")}</div>')
+    body.append(f'<div class="contact">{ed(contact_html(contact), at.get("contact"), "contact")}</div>')
     body.append('<div class="rule-heavy after-contact"></div>')
 
     section = None
@@ -156,13 +180,13 @@ def render(md):
             close_job()
             rule = roles_in_section > 0 or section == "ADDITIONAL EXPERIENCE"
             roles_in_section += 1
-            jobline = f"{inline(m.group(1))} | {inline(m.group(2))}"
+            jobline = f"{ed(inline(m.group(1)), i - 1, 'company')} | {ed(inline(m.group(2)), i - 1, 'role')}"
             dates = ""
             # the italic date line follows
             while i < len(lines) and not lines[i].strip():
                 i += 1
             if i < len(lines) and re.match(r"^\*[^*].*\*$", lines[i].strip()):
-                dates = lines[i].strip().strip("*").strip()
+                dates = ed(inline(lines[i].strip().strip("*").strip()), i, "dates")
                 i += 1
             body.append('<div class="job">')
             job_open = True
@@ -172,11 +196,11 @@ def render(md):
             if rule:
                 body.append('<div class="rule-light"></div>')
             body.append(f'<div class="jobrow"><div class="jobline">{jobline}</div>'
-                        f'<div class="dates">{inline(dates)}</div></div>')
+                        f'<div class="dates">{dates}</div></div>')
             continue
         indent = len(raw) - len(raw.lstrip(" "))
         if ln.startswith("- "):
-            text = inline(ln[2:])
+            text = ed(inline(ln[2:]), i - 1, "bullet")
             if indent >= 2 and list_open:
                 if not nested_open:
                     body.append('<ul class="n">')
@@ -198,24 +222,25 @@ def render(md):
             if nested_open:
                 body.append("</ul>")
                 nested_open = False
-                body.append(f" {inline(ln)}</li>")
+                body.append(f" {ed(inline(ln), i - 1, 'line')}</li>")
                 # reopen a hidden li so close_lists stays balanced
                 body.append('<li style="display:none">')
             else:
-                body.append(f" {inline(ln)}")
+                body.append(f" {ed(inline(ln), i - 1, 'line')}")
             continue
         # plain paragraph
         close_lists()
+        text = ed(inline(ln), i - 1, "line")
         if section == "ADDITIONAL EXPERIENCE":
-            body.append(f'<p class="addl-p">{inline(ln)}</p>')
+            body.append(f'<p class="addl-p">{text}</p>')
         elif section == "CORE SKILLS":
-            body.append(f'<p class="skills-p">{inline(ln)}</p>')
+            body.append(f'<p class="skills-p">{text}</p>')
         else:
-            body.append(f"<p>{inline(ln)}</p>")
+            body.append(f"<p>{text}</p>")
     close_job()
     title = f"{name} Resume"
     return (f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
-            f"<style>{CSS}</style></head><body>{''.join(body)}</body></html>")
+            f"<style>{CSS}{EDIT_CSS if editable else ''}</style></head><body>{''.join(body)}</body></html>")
 
 
 # The skill's fix for a tight page: cut section-header top margins 16pt -> 12pt

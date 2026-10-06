@@ -149,3 +149,49 @@ def test_not_applying_is_kept_and_a_missing_notion_option_is_explained(tmp_path)
     with pytest.raises(RuntimeError, match=r'add one in Notion'):
         t.sync()
     assert next(r for r in t.rows() if r["page_id"] == "p1")["pending"]
+
+
+def test_applied_day_is_kept_for_the_dashboard(tmp_path, monkeypatch):
+    import jobpipe.tracker as tracker_mod
+    day = {"v": "2026-10-03"}
+    monkeypatch.setattr(tracker_mod, "_today", lambda: day["v"])
+    t, fake, notion = make(tmp_path, [notion_row("p1", URL), notion_row("p2", "https://x.example/jobs/2")])
+    t.sync()
+    applied_on = lambda: {r["page_id"]: r["applied_on"] for r in t.rows()}
+    assert applied_on() == {"p1": "", "p2": ""}
+
+    t.set_status("p1", "Applied")
+    day["v"] = "2026-10-05"
+    t.set_status("p1", "Interviewing")                 # a later stage keeps the day it was applied to
+    assert applied_on()["p1"] == "2026-10-03"
+    t.set_status("p1", "In progress")                  # moved back: not applied any more
+    assert applied_on()["p1"] == ""
+
+    # a status changed in Notion counts from the sync that sees it
+    fake.rows["p2"]["properties"]["Status"]["status"]["name"] = "Offer"
+    t.sync()
+    assert applied_on()["p2"] == "2026-10-05"
+    # Notion's Due/Submitted wins once it's set, unless it's still in the future
+    fake.rows["p2"]["properties"]["Due/Submitted"] = {"date": {"start": "2026-09-30"}}
+    t.sync()
+    assert applied_on()["p2"] == "2026-09-30"
+    fake.rows["p2"]["properties"]["Due/Submitted"] = {"date": {"start": "2026-10-20"}}
+    t.sync()
+    assert applied_on()["p2"] == "2026-10-05"
+
+
+def test_a_tracker_from_before_the_applied_day_is_backfilled(tmp_path):
+    import sqlite3
+    db = tmp_path / "tracker.db"
+    con = sqlite3.connect(db)
+    con.executescript("""CREATE TABLE tracker (id TEXT PRIMARY KEY, notion_page_id TEXT UNIQUE, page_url TEXT NOT NULL DEFAULT '',
+        job_id TEXT, name TEXT NOT NULL DEFAULT '', company TEXT NOT NULL DEFAULT '', job_url TEXT NOT NULL DEFAULT '',
+        url_key TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', fit REAL, notes TEXT NOT NULL DEFAULT '',
+        priority TEXT NOT NULL DEFAULT '', due TEXT NOT NULL DEFAULT '', entry TEXT, dirty_status INTEGER NOT NULL DEFAULT 0,
+        updated TEXT NOT NULL DEFAULT '');
+        INSERT INTO tracker(id, status, updated) VALUES ('a', 'Applied', '2026-09-20T12:00:00+00:00'),
+                                                      ('b', 'In progress', '2026-09-21T12:00:00+00:00');""")
+    con.commit()
+    con.close()
+    t = LocalTracker(db)
+    assert {r["page_id"]: r["applied_on"] for r in t.rows()} == {"a": "2026-09-20", "b": ""}

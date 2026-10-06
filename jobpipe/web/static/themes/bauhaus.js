@@ -35,10 +35,17 @@
   function show(...els) { clear(); live = els; document.body.append(...els); }
 
   // Applied: a green field wipes across left to right, "APPLIED." slides in and holds, then the field
-  // collapses into the Applied block and goes; the banner says what was sent.
-  async function applied({ job, counts, anchor }) {
-    const wipe = h("div", { class: "bh-wipe", "aria-hidden": "true" });
-    const word = h("div", { class: "bh-word", "aria-hidden": "true" }, h("span", {}, "APPLIED."));
+  // collapses into the Applied block and goes; the banner says what was sent. Interviewing and Offer
+  // wipe the same way in their own stage's colour.
+  const applied = ({ job, counts, anchor }) =>
+    wipeTo({ anchor, stage: "Applied", word: "APPLIED.", msg: words.appliedWords(job, counts), cls: "applied" });
+  const interviewing = ({ job, anchor }) =>
+    wipeTo({ anchor, stage: "Interviewing", word: "INTERVIEW.", msg: words.interviewingWords(job), cls: "interviewing" });
+  const offer = ({ job, anchor }) =>
+    wipeTo({ anchor, stage: "Offer", word: "OFFER!", msg: words.offerWords(job), cls: "offer", ms: 6000 });
+  async function wipeTo({ anchor, stage, word: text, msg, cls, ms }) {
+    const wipe = h("div", { class: "bh-wipe", "data-stage": stage, "aria-hidden": "true" });
+    const word = h("div", { class: "bh-word", "aria-hidden": "true" }, h("span", {}, text));
     show(wipe, word);
     const span = word.firstChild;
     if (RM()) {
@@ -52,7 +59,7 @@
       anim(span, [{ transform: "translateX(-60px)", opacity: 0 }, { transform: "none", opacity: 1 }], { duration: 380, delay: 220, easing: EASE_OUT });
       await new Promise((r) => setTimeout(r, 1250));
       anim(span, [{ transform: "none", opacity: 1 }, { transform: "translateX(60px)", opacity: 0 }], { duration: 260, easing: "ease-in" });
-      const t = target("Applied", anchor);
+      const t = target(stage, anchor);
       await finished(anim(wipe, [
         { top: "0px", left: "0px", width: `${innerWidth}px`, height: `${innerHeight}px`, transform: "none" },
         { top: `${t.top}px`, left: `${t.left}px`, width: `${t.width}px`, height: `${t.height}px`, transform: "none" },
@@ -60,7 +67,7 @@
       await finished(anim(wipe, [{ opacity: 1 }, { opacity: 0 }], { duration: 180 }));
     }
     if (live.includes(wipe)) clear();
-    banner(words.appliedWords(job, counts), "applied");
+    banner(msg, cls, ms);
   }
 
   // Done: a shorter blue field slides in from the right with "DONE." and the role's name, holds, then
@@ -105,6 +112,6 @@
     swatches: ["#FFFFFF", "#000000", "#FFD400", "#FF4F1F", "#2E6BFF", "#19B36B"],
     confetti: ["#FFD400", "#FF4F1F", "#2E6BFF", "#19B36B", "#000000"],
     cat: CAT,
-    render: { applied, done, denied },
+    render: { applied, done, denied, interviewing, offer },
   });
 })();

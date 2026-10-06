@@ -13,7 +13,7 @@ from .config import Config, Search
 from .jd import build_jd, posting_url
 from .jobs_api import BudgetExhausted, JobsClient, post_filter, salary_text, work_mode
 from .llm import PROVIDERS, ClaudeCodeRunner, ClaudeRunner, OpenAICompatRunner, Runner
-from .notion import NotionTracker, TrackerEntry
+from .notion import APPLIED_STATUSES, NotionTracker, TrackerEntry
 from .startups import funding_line
 from .store import Store, canonical_url, slug
 from .tailor import JobMeta, Tailor, TailorResult, copy_analysis
@@ -205,7 +205,7 @@ class Pipeline:
         keep, skipped = [], []
         for c in cands:
             st = notion.get(canonical_url(c.meta.url))
-            if st in ("Applied", "Denied", "Done", "Not Applying"):
+            if st in (*APPLIED_STATUSES, "Not Applying"):
                 skipped.append(f"{c.meta.title} @ {c.meta.company}: already {st} in Notion")
             elif not retriage and state.get(c.id, {}).get("triage"):
                 skipped.append(f"{c.meta.title} @ {c.meta.company}: triaged on an earlier run "

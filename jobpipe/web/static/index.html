@@ -21,20 +21,25 @@
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Job Search</div>
     <nav class="tabs" role="tablist">
-      <button role="tab" data-tab="tracker" class="active">Tracker <span class="count" id="count-tracker"></span></button>
       <button role="tab" data-tab="find">Find jobs <span class="count" id="count-find"></span></button>
+      <span class="tab-sep" aria-hidden="true"></span>
+      <button role="tab" data-tab="tracker" class="active">Tracker <span class="count" id="count-tracker"></span></button>
       <button role="tab" data-tab="startups">Startups <span class="count" id="count-startups"></span></button>
+      <span class="tab-sep" aria-hidden="true"></span>
       <button role="tab" data-tab="searches">Filters</button>
       <button role="tab" data-tab="runs">Runs</button>
+      <span class="tab-sep" aria-hidden="true"></span>
       <button role="tab" data-tab="impact">Impact record <span class="dirty-dot hidden" id="impact-dirty" title="Unsaved changes"></span></button>
-      <button role="tab" data-tab="prep">Interview prep <span class="dirty-dot hidden" id="prep-dirty" title="Unsaved changes"></span></button>
       <button role="tab" data-tab="notes">Confirmed facts</button>
-      <button role="tab" data-tab="profile">Profile</button>
+      <button role="tab" data-tab="prep">Interview prep <span class="dirty-dot hidden" id="prep-dirty" title="Unsaved changes"></span></button>
+      <span class="tab-sep" aria-hidden="true"></span>
+      <button role="tab" data-tab="dashboard">Dashboard</button>
     </nav>
     <div class="meta">
       <button id="run-indicator" class="pill live hidden"></button>
       <span id="credits" class="pill" title="JobsPipe credits used"></span>
       <span id="backend" class="pill subtle"></span>
+      <button role="tab" data-tab="profile" id="profile-btn" class="profile-btn" type="button" title="Profile" aria-label="Profile"><span class="ico" data-icon="person"></span></button>
       <button id="look-btn" class="icon-btn" type="button" title="Change the look (in Profile)" aria-label="Change the look"><span class="ico" data-icon="palette"></span></button>
     </div>
   </header>
@@ -65,6 +70,7 @@
           <button id="refresh-jobs" class="ghost" title="Send changes to Notion and fetch Notion's now">Sync</button>
           <button id="run-searches" class="ghost hidden">Run filters…</button>
           <button id="paste-job" class="primary">Add a job…</button>
+          <button id="fold-filters" class="icon-btn fold-btn" type="button" title="Fold the filters into one line (⌘\ folds everything)" aria-label="Fold the filters" aria-expanded="true"><span class="ico" data-icon="up"></span></button>
         </div>
         <div class="tools-row">
           <div class="seg hidden" id="find-seg" role="group" aria-label="Filter new roles"></div>
@@ -81,6 +87,7 @@
           </div>
         </div>
       </div>
+      <div id="fold-strip" class="fold-strip" aria-label="Filters, folded"></div>
       <div id="jobs-body" class="jobs-body view-list">
         <aside class="joblist">
           <div class="list-head">
@@ -99,9 +106,14 @@
                 <option value="company">Company</option>
               </select>
             </label>
+            <button id="fold-list" class="icon-btn fold-btn" type="button" title="Fold the list into a rail of scores" aria-label="Fold the list" aria-expanded="true"><span class="ico" data-icon="left"></span></button>
           </div>
           <div id="batch" class="batch hidden"></div>
           <ul id="jobs" class="jobs"></ul>
+          <nav id="rail" class="rail" aria-label="Roles, folded">
+            <button id="unfold-list" class="icon-btn fold-btn" type="button" title="Show the list" aria-label="Show the list" aria-expanded="false"><span class="ico" data-icon="right"></span></button>
+            <div id="rail-jobs" class="rail-jobs"></div>
+          </nav>
         </aside>
         <div id="board" class="board"></div>
         <div id="drawer-backdrop" class="drawer-backdrop"></div>
@@ -165,6 +177,20 @@
           <button data-run="full" class="primary">Search + score + tailor top</button>
           <label class="inline"><span class="sr-only">How many to tailor</span><input id="run-top" type="number" min="0" max="10" value="3"></label>
         </div>
+      </div>
+    </section>
+
+    <!-- Dashboard -->
+    <section id="tab-dashboard" class="tab-panel">
+      <div class="page dash">
+        <div class="page-head">
+          <div>
+            <h1>Dashboard</h1>
+            <p class="muted">Your applications, from the tracker. A job counts as applied once its stage is Applied, Waiting,
+              Interviewing, Offer, Denied (shown here as Rejected) or Done.</p>
+          </div>
+        </div>
+        <div id="dash" class="dash-grid"></div>
       </div>
     </section>
 

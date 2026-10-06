@@ -24,6 +24,8 @@ html[data-theme="arcade"] {
   --fit-hi-bg: #15AC7D; --fit-hi: #1B1B4D; --fit-mid-bg: #DDAD0F; --fit-mid: #1B1B4D; --fit-lo-bg: #C9D6E8; --fit-lo: #1B1B4D;
   --st-untracked: #8A9BB0; --st-not-started: #12A9DB; --st-in-progress: #EF6505; --st-blocked: #A3602F;
   --st-applied: #15AC7D; --st-done: #DDAD0F; --st-denied: #8B5DCE; --st-not-applying: #186A99;
+  --st-waiting: #B8C4D6; --st-interviewing: #FF2D95; --st-offer: #FFD500;
+  --chart: #0E58A8;
   --shadow: 4px 4px 0 var(--ink);
   --radius: 0px;
   --px: 3px;
@@ -47,12 +49,12 @@ html[data-theme="arcade"] .topbar { height: auto; min-height: 52px; padding: 6px
 html[data-theme="arcade"] .brand { font: 400 17px/1 var(--pixel-lg); letter-spacing: 0; gap: 10px; }
 html[data-theme="arcade"] .brand-mark { width: 12px; height: 12px; border-radius: 0; background: var(--accent); border: 2px solid var(--ink); }
 html[data-theme="arcade"] .tabs { gap: 1px; align-self: center; flex-wrap: wrap; }
-html[data-theme="arcade"] .tabs button { padding: 5px 7px; border: var(--px) solid transparent; border-radius: 0; font-weight: 500; font-size: 14px; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+html[data-theme="arcade"] .tabs button { padding: 5px 5px; border: var(--px) solid transparent; border-radius: 0; font-weight: 500; font-size: 14px; color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
 html[data-theme="arcade"] .tabs button:hover { border-color: var(--ink); color: var(--ink); }
 html[data-theme="arcade"] .tabs button.active { background: var(--ink); color: #fff; border-color: var(--ink); font-weight: 500; }
 html[data-theme="arcade"] .count { font: 400 10px/1 var(--pixel); background: var(--yellow); color: var(--ink); border-radius: 0; min-width: 0; padding: 3px 5px 2px; margin-left: 2px; }
 html[data-theme="arcade"] .dirty-dot { width: 8px; height: 8px; border-radius: 0; background: var(--accent); border: 2px solid var(--ink); box-sizing: border-box; }
-html[data-theme="arcade"] .pill { border: var(--px) solid var(--ink); border-radius: 0; background: var(--panel); color: var(--ink); font-size: 14px; font-weight: 500; padding: 3px 10px; }
+html[data-theme="arcade"] .pill { border: var(--px) solid var(--ink); border-radius: 0; background: var(--panel); color: var(--ink); font-size: 12.5px; font-weight: 500; padding: 2px 8px; }
 html[data-theme="arcade"] .pill.subtle { color: var(--muted); border-color: var(--line); }
 html[data-theme="arcade"] .pill.live { color: var(--ink); background: color-mix(in srgb, var(--st-applied) 24%, white); }
 html[data-theme="arcade"] .icon-btn { border-radius: 0; color: var(--ink); }
@@ -74,6 +76,9 @@ html[data-theme="arcade"] button.danger { color: var(--bad); }
 html[data-theme="arcade"] .quick.primary[data-to="Applied"] { background: var(--st-applied); color: var(--ink); }
 html[data-theme="arcade"] .quick.primary[data-to="Applied"]:hover:not(:disabled) { background: var(--green); }
 html[data-theme="arcade"] .quick[data-to="Done"] { background: var(--st-done); color: var(--ink); }
+html[data-theme="arcade"] .quick.primary[data-to="Interviewing"] { background: var(--st-interviewing); color: var(--ink); }
+html[data-theme="arcade"] .quick.primary[data-to="Offer"] { background: var(--st-offer); color: var(--ink); }
+html[data-theme="arcade"] .quick.primary:is([data-to="Interviewing"], [data-to="Offer"]):hover:not(:disabled) { filter: brightness(1.08); }
 html[data-theme="arcade"] .quick[data-to="Done"]:hover:not(:disabled) { background: var(--yellow); }
 html[data-theme="arcade"] .star.labeled { padding: 5px 12px 5px 9px; }
 html[data-theme="arcade"] .star.labeled[aria-pressed="true"] { background: var(--yellow); color: var(--ink); }
@@ -117,14 +122,17 @@ html[data-theme="arcade"] .stage, html[data-theme="arcade"] .stage:first-child, 
   position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; height: 44px; padding: 0 10px;
   border: var(--px) solid var(--ink); border-radius: 0; margin-left: calc(-1 * var(--px)); background: var(--c); color: var(--ink); text-align: left; overflow: hidden;
   transition: flex-grow .6s steps(6, end); }
-html[data-theme="arcade"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 104px; }
+html[data-theme="arcade"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 76px; }
 html[data-theme="arcade"] .stage[data-stage="Not started"] { order: 1; margin-left: 0; }
 html[data-theme="arcade"] .stage[data-stage="In progress"] { order: 2; }
 html[data-theme="arcade"] .stage[data-stage="Applied"] { order: 3; }
-html[data-theme="arcade"] .stage[data-stage="Done"] { order: 4; }
-html[data-theme="arcade"] .stage[data-stage="Blocked"] { order: 5; margin-left: 12px; }
-html[data-theme="arcade"] .stage[data-stage="Denied"] { order: 6; }
-html[data-theme="arcade"] .stage[data-stage="Not Applying"] { order: 7; }
+html[data-theme="arcade"] .stage[data-stage="Waiting"] { order: 4; }
+html[data-theme="arcade"] .stage[data-stage="Interviewing"] { order: 5; }
+html[data-theme="arcade"] .stage[data-stage="Offer"] { order: 6; }
+html[data-theme="arcade"] .stage[data-stage="Done"] { order: 7; }
+html[data-theme="arcade"] .stage[data-stage="Blocked"] { order: 8; margin-left: 12px; }
+html[data-theme="arcade"] .stage[data-stage="Denied"] { order: 9; }
+html[data-theme="arcade"] .stage[data-stage="Not Applying"] { order: 10; }
 html[data-theme="arcade"] .stage[data-kind="side"] { flex: 0 0 auto; flex-direction: column; justify-content: center; gap: 4px; min-width: 66px; padding: 3px 8px; margin-left: 6px;
   background: var(--c); color: #fff; }
 /* a segment with nothing in it fades to a tint (the overlay's opacity is 1 - min(n, 1)); the words stay on top */
@@ -261,7 +269,7 @@ html[data-theme="arcade"] .markdown th, html[data-theme="arcade"] .markdown td {
 html[data-theme="arcade"] .heatmap { border-top: var(--px) solid var(--ink); }
 
 /* the stage path (level map) and the stat meters as segmented pixel bars */
-html[data-theme="arcade"] .path-line { max-width: 560px; padding-top: 14px; }
+html[data-theme="arcade"] .path-line { max-width: 760px; padding-top: 14px; }
 html[data-theme="arcade"] .path-line::before { top: 22px; height: 4px; border-radius: 0; background: var(--ink); }
 html[data-theme="arcade"] .path-line .dot { width: 20px; height: 20px; border-radius: 0; background: var(--panel); box-shadow: inset 0 0 0 3px var(--line); }
 html[data-theme="arcade"] .path-line .step.reached .dot { background: var(--c); box-shadow: inset 0 0 0 3px var(--ink); }
@@ -299,6 +307,8 @@ html[data-theme="arcade"] .px-burst-card { background: var(--panel); border: 4px
   max-width: min(560px, calc(100vw - 32px)); animation: px-slam .35s steps(4, end); }
 html[data-theme="arcade"] .px-burst-title { font: 400 26px/1.25 var(--pixel); color: var(--ink); text-shadow: 3px 3px 0 var(--yellow); }
 html[data-theme="arcade"] .px-burst.done .px-burst-title { font-size: 22px; text-shadow: 3px 3px 0 var(--st-done); }
+html[data-theme="arcade"] .px-burst.interviewing .px-burst-title { text-shadow: 3px 3px 0 var(--st-interviewing); }
+html[data-theme="arcade"] .px-burst.offer .px-burst-title { font-size: 34px; text-shadow: 3px 3px 0 var(--st-offer), 6px 6px 0 var(--st-interviewing); }
 html[data-theme="arcade"] .px-burst-score { font: 400 18px/1 var(--pixel); color: var(--accent-ink); margin-top: 16px; font-variant-numeric: tabular-nums; }
 html[data-theme="arcade"] .px-burst-msg { font-size: 17px; margin: 14px 0 0; }
 html[data-theme="arcade"] .px-burst-sub { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
@@ -388,9 +398,41 @@ html[data-theme="arcade"] .startups-body .detail .pad { background: var(--paper)
 html[data-theme="arcade"] .roles li { border-top: 2px solid var(--line); }
 html[data-theme="arcade"] .funding-note { font-size: 13px; }
 
+/* the dashboard: a score counter, the stages as HP bars in pixel frames, the days as pixel columns */
+html[data-theme="arcade"] .dash-grid .card { box-shadow: 4px 4px 0 var(--ink); padding: 14px 16px 16px; }
+html[data-theme="arcade"] .dash-grid .card:first-child { background: var(--ink); color: #fff; }
+html[data-theme="arcade"] .hero-label { font: 400 11px/1.5 var(--pixel); color: var(--yellow); }
+html[data-theme="arcade"] .hero-n { font: 400 64px/1 var(--pixel); color: #fff; text-shadow: 4px 4px 0 var(--accent); margin: 18px 0 16px; letter-spacing: 0; }
+html[data-theme="arcade"] .hero-sub { color: #D8D8F0; }
+html[data-theme="arcade"] .hero-sub b { color: var(--yellow); font: 400 12px var(--pixel); }
+html[data-theme="arcade"] .stage-bars { gap: 6px; }
+html[data-theme="arcade"] .stage-bars button { border-radius: 0; padding: 3px 4px; grid-template-columns: 110px 1fr; }
+html[data-theme="arcade"] .stage-bars button:hover { background: var(--sel); }
+html[data-theme="arcade"] .stage-bars .l { color: var(--ink); font-weight: 500; }
+html[data-theme="arcade"] .stage-bars .bar { height: 18px; border-radius: 0; background: var(--c); border: var(--px) solid var(--ink); box-sizing: border-box;
+  background-image: repeating-linear-gradient(90deg, transparent 0 9px, rgba(27, 27, 77, .25) 9px 12px); }
+html[data-theme="arcade"] .stage-bars .bar.zero { width: 18px !important; background: var(--panel); border-color: var(--line); }
+html[data-theme="arcade"] .stage-bars .v { font: 400 12px var(--pixel); }
+html[data-theme="arcade"] .day-chart .col { fill: var(--chart); stroke: var(--ink); stroke-width: 2px; shape-rendering: crispEdges; }
+html[data-theme="arcade"] .day-chart .grid line { stroke: var(--line); shape-rendering: crispEdges; }
+html[data-theme="arcade"] .day-chart .grid line:last-child { stroke: var(--ink); stroke-width: 3px; }
+html[data-theme="arcade"] .day-chart .axis text { font-size: 12px; fill: var(--muted); }
+html[data-theme="arcade"] .day-chart .cap { font: 400 11px var(--pixel); fill: var(--accent-ink); }
+html[data-theme="arcade"] .dash-tip { border: var(--px) solid var(--ink); border-radius: 0; box-shadow: 4px 4px 0 var(--ink); }
+html[data-theme="arcade"] .dash-tip .tv { font: 400 12px/1.5 var(--pixel); }
+html[data-theme="arcade"] .dash-table summary { color: var(--link); font-weight: 500; }
+
+/* seven segments on the main line: the bar takes its own row and each segment stacks its count over its
+   name, like the exit tiles, so every name fits */
+html[data-theme="arcade"] .jobs-tools .tools-row:has(> .stage-wrap) { flex-wrap: wrap; }
+html[data-theme="arcade"] .stage-wrap { flex-basis: 100%; }
+html[data-theme="arcade"] .stage[data-kind="path"] { flex-direction: column; justify-content: center; align-items: flex-start; gap: 3px; }
+html[data-theme="arcade"] .stage[data-kind="path"] .n { order: 1; margin-left: 0; font-size: 12px; }
+html[data-theme="arcade"] .stage[data-kind="path"] .l { order: 2; font-size: 13px; line-height: 1.1; }
 @media (max-width: 1100px) {
   html[data-theme="arcade"] .stage, html[data-theme="arcade"] .stage:first-child, html[data-theme="arcade"] .stage:nth-child(n+5) { height: 40px; padding: 0 8px; }
-  html[data-theme="arcade"] .stage[data-kind="path"] { min-width: 92px; }
+  html[data-theme="arcade"] .stage[data-kind="path"] { min-width: 76px; padding: 0 6px; }
+  html[data-theme="arcade"] .stage[data-kind="path"] .l { font-size: 11.5px; }
   html[data-theme="arcade"] .stage[data-kind="side"] { padding: 1px 6px; gap: 2px; min-width: 60px; }
 }
 @media (max-width: 760px) {
@@ -407,3 +449,5 @@ html[data-theme="arcade"] .funding-note { font-size: 13px; }
   html[data-theme="arcade"] .cat-px .ears-down { visibility: visible; }
   html[data-theme="arcade"] .stage, html[data-theme="arcade"] .meter .track i { transition: none; }
 }
+html[data-theme="arcade"] .tabs { gap: 2px; } html[data-theme="arcade"] .tab-sep { background: var(--ink); opacity: .35; }
+html[data-theme="arcade"] #backend { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }

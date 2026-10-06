@@ -25,9 +25,13 @@ from .store import canonical_url
 
 API = "https://api.notion.com/v1"
 VERSION = "2025-09-03"  # data-source API
-# "Denied": applied and turned down, e.g. not offered an interview.
+# "Waiting": applied and heard back, waiting on the next step. "Interviewing" and "Offer" follow it.
+# "Denied": applied and turned down, e.g. not offered an interview (the dashboard calls it Rejected).
 # "Not Applying": ruled out (a poor fit, or little chance of an interview). Kept so it isn't found and scored again.
-STATUSES = ("Not started", "In progress", "Blocked", "Applied", "Denied", "Done", "Not Applying")
+STATUSES = ("Not started", "In progress", "Blocked", "Applied", "Waiting", "Interviewing", "Offer", "Denied", "Done",
+            "Not Applying")
+# The stages that mean the application was sent: they count as applied on the dashboard.
+APPLIED_STATUSES = ("Applied", "Waiting", "Interviewing", "Offer", "Denied", "Done")
 SCORE_NOTE_RE = re.compile(r"(?:Scored|Triaged) \d{4}-\d{2}-\d{2}[^\n]*")
 
 
@@ -194,7 +198,7 @@ class NotionTracker:
         old_notes = _plain(page["properties"].get("Notes", {}).get("rich_text", []))
         props["Notes"] = {"rich_text": [_text(merge_notes(old_notes, e.notes))]}
         status = _prop_status(page)
-        # Only Not started/empty moves to In progress; Applied, Denied, Done, Blocked and Not Applying are never moved back.
+        # Only Not started/empty moves to In progress; every later stage is never moved back.
         if status in (None, "", "Not started") and e.status == "In progress":
             props["Status"] = {"status": {"name": "In progress"}}
         if not _prop_url(page):

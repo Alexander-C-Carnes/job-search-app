@@ -20,6 +20,8 @@ html[data-theme="bauhaus"] {
   --fit-hi-bg: #19B36B; --fit-hi: #000000; --fit-mid-bg: #FFD400; --fit-mid: #000000; --fit-lo-bg: #FF4F1F; --fit-lo: #000000;
   --st-untracked: #E9E9E9; --st-not-started: #FFD400; --st-in-progress: #FF4F1F; --st-blocked: #E3D7C3;
   --st-applied: #19B36B; --st-done: #2E6BFF; --st-denied: #8FA5C6; --st-not-applying: #E9E9E9;
+  --st-waiting: #FFE98A; --st-interviewing: #9B7BFF; --st-offer: #FF77B7;
+  --chart: #2E6BFF;
   --rd-pre-seed: #E3D7C3; --rd-seed: #FFD400; --rd-a: #19B36B; --rd-b: #2E6BFF; --rd-c: #FF77B7; --rd-d: #FF4F1F; --rd-growth: #8FA5C6; --rd-unknown: #E9E9E9;
   --shadow: none;
   --radius: 0;
@@ -114,21 +116,25 @@ html[data-theme="bauhaus"] .sync-state { color: var(--muted); font-weight: 500; 
 html[data-theme="bauhaus"] .stages { display: flex; align-items: stretch; height: 84px; background: none; border: 0; border-radius: 0; overflow: visible; }
 html[data-theme="bauhaus"] .stages .stage { position: relative; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 0;
   padding: 8px 12px 7px; border: 0; border-radius: 0; background: var(--c); color: var(--black); text-align: left; min-width: 0; transition: flex-grow .4s cubic-bezier(.4, 0, .2, 1); }
-html[data-theme="bauhaus"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 96px; }
+html[data-theme="bauhaus"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 72px; }
 html[data-theme="bauhaus"] .stage[data-kind="side"] { flex: 0 0 84px; width: 84px; }
 html[data-theme="bauhaus"] .stage[data-stage="Not started"] { order: 1; }
 html[data-theme="bauhaus"] .stage[data-stage="In progress"] { order: 2; }
 html[data-theme="bauhaus"] .stage[data-stage="Applied"] { order: 3; }
-html[data-theme="bauhaus"] .stage[data-stage="Done"] { order: 4; }
-html[data-theme="bauhaus"] .stage[data-stage="Blocked"] { order: 5; }
-html[data-theme="bauhaus"] .stage[data-stage="Denied"] { order: 6; }
-html[data-theme="bauhaus"] .stage[data-stage="Not Applying"] { order: 7; }
+html[data-theme="bauhaus"] .stage[data-stage="Waiting"] { order: 4; }
+html[data-theme="bauhaus"] .stage[data-stage="Interviewing"] { order: 5; }
+html[data-theme="bauhaus"] .stage[data-stage="Offer"] { order: 6; }
+html[data-theme="bauhaus"] .stage[data-stage="Done"] { order: 7; }
+html[data-theme="bauhaus"] .stage[data-stage="Blocked"] { order: 8; }
+html[data-theme="bauhaus"] .stage[data-stage="Denied"] { order: 9; }
+html[data-theme="bauhaus"] .stage[data-stage="Not Applying"] { order: 10; }
 html[data-theme="bauhaus"] .stage:hover { background: var(--c); }
 html[data-theme="bauhaus"] .stage:hover .l { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px; }
 html[data-theme="bauhaus"] .stage[aria-pressed="true"] { background: var(--c); outline: 4px solid var(--black); outline-offset: -4px; z-index: 1; }
 html[data-theme="bauhaus"] .stage:focus-visible { outline: 4px solid var(--black); outline-offset: 2px; z-index: 2; }
 html[data-theme="bauhaus"] .stage .n { font: 400 56px/.9 var(--display); letter-spacing: -.03em; color: var(--black); }
 html[data-theme="bauhaus"] .stage .l { font-size: 12px; font-weight: 700; color: var(--black); max-width: 100%; }
+html[data-theme="bauhaus"] .stage[data-kind="path"] .l { white-space: normal; overflow: visible; hyphens: auto; -webkit-hyphens: auto; line-height: 1.1; }
 html[data-theme="bauhaus"] .stage[data-kind="side"] .n { font-size: 30px; letter-spacing: -.02em; }
 html[data-theme="bauhaus"] .stage[data-kind="side"] .l { font-size: 11px; line-height: 1.1; white-space: normal; overflow: visible; }
 html[data-theme="bauhaus"] .stage[aria-pressed="true"] .n, html[data-theme="bauhaus"] .stage[aria-pressed="true"] .l { color: var(--black); }
@@ -253,7 +259,7 @@ html[data-theme="bauhaus"] .spinner { border-color: var(--grey); border-top-colo
 
 /* the stage path: squares on a black line; the résumé meters: flat bars with black ticks */
 html[data-theme="bauhaus"] .stage-path { margin-top: 14px; padding-top: 12px; border-top: var(--rule); gap: 8px; }
-html[data-theme="bauhaus"] .path-line { max-width: 560px; }
+html[data-theme="bauhaus"] .path-line { max-width: 760px; }
 html[data-theme="bauhaus"] .path-line::before { top: 11px; height: 2px; background: var(--black); border-radius: 0; }
 html[data-theme="bauhaus"] .path-line .dot { width: 24px; height: 24px; border-radius: 0; background: var(--grey); box-shadow: none; }
 html[data-theme="bauhaus"] .path-line .step.reached .dot { background: var(--black); }
@@ -281,6 +287,9 @@ html[data-theme="bauhaus"] .meter .track::before { content: ""; position: absolu
 html[data-theme="bauhaus"] button.quick { background: var(--grey); color: var(--black); font-weight: 700; box-shadow: none; }
 html[data-theme="bauhaus"] button.quick.small { padding: 7px 12px; font-size: 12.5px; }
 html[data-theme="bauhaus"] button.quick[data-to="Applied"] { background: var(--green); }
+html[data-theme="bauhaus"] button.quick[data-to="Waiting"] { background: var(--st-waiting); }
+html[data-theme="bauhaus"] button.quick[data-to="Interviewing"] { background: var(--st-interviewing); }
+html[data-theme="bauhaus"] button.quick[data-to="Offer"] { background: var(--st-offer); }
 html[data-theme="bauhaus"] button.quick[data-to="Done"] { background: var(--blue); }
 html[data-theme="bauhaus"] button.quick[data-to="Denied"] { background: var(--grey-blue); }
 html[data-theme="bauhaus"] button.quick[data-to="In progress"] { background: var(--red); }
@@ -291,6 +300,8 @@ html[data-theme="bauhaus"] .toast { background: var(--black); color: var(--white
 html[data-theme="bauhaus"] .toast.error { background: var(--red); color: var(--black); }
 html[data-theme="bauhaus"] .moment-banner { background: var(--green); color: var(--black); border-radius: 0; padding: 14px 24px; font: 700 18px/1.2 var(--body); box-shadow: none; }
 html[data-theme="bauhaus"] .moment-banner.done { background: var(--blue); color: var(--black); }
+html[data-theme="bauhaus"] .moment-banner.interviewing { background: var(--st-interviewing); }
+html[data-theme="bauhaus"] .moment-banner.offer { background: var(--st-offer); font-size: 22px; }
 html[data-theme="bauhaus"] .cat-card { width: 420px; background: var(--blue); color: var(--black); border: 0; border-radius: 0; padding: 18px 20px; box-shadow: none; }
 html[data-theme="bauhaus"] .cat-card .cat-art { width: 150px; }
 html[data-theme="bauhaus"] .cat-card .cat-art svg { width: 150px; height: 116px; }
@@ -306,6 +317,8 @@ html[data-theme="bauhaus"] .sparkle i { border-radius: 0; }
 html[data-theme="bauhaus"] .flyer { border-radius: 0; }
 /* the Applied wipe and the Done field, built by bauhaus.js */
 html[data-theme="bauhaus"] .bh-wipe { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: var(--green); z-index: 60; transform-origin: left center; pointer-events: none; }
+html[data-theme="bauhaus"] .bh-wipe[data-stage="Interviewing"] { background: var(--st-interviewing); }
+html[data-theme="bauhaus"] .bh-wipe[data-stage="Offer"] { background: var(--st-offer); }
 html[data-theme="bauhaus"] .bh-word { position: fixed; inset: 0; z-index: 61; display: grid; place-items: center; pointer-events: none; }
 html[data-theme="bauhaus"] .bh-word span { font: 400 clamp(64px, 9vw, 128px)/1 var(--display); letter-spacing: -.03em; color: var(--black); }
 html[data-theme="bauhaus"] .bh-done { position: fixed; top: 0; right: 0; bottom: 0; width: min(56vw, 760px); background: var(--blue); z-index: 60; padding: 32px; display: flex; flex-direction: column; justify-content: center; gap: 16px; pointer-events: none; overflow: hidden; }
@@ -372,6 +385,36 @@ html[data-theme="bauhaus"] .roles details summary { color: var(--black); font-we
 html[data-theme="bauhaus"] .funding-note { color: var(--muted); }
 html[data-theme="bauhaus"] .startups-body .detail .pad { background: var(--white); }
 
+/* the dashboard: a yellow field with a huge black count, the stages as flat colour blocks on black rules */
+html[data-theme="bauhaus"] .dash-grid { gap: 0 24px; }
+html[data-theme="bauhaus"] .dash-grid .card { padding: 14px 0 18px; border-top: 4px solid var(--black); }
+html[data-theme="bauhaus"] .dash-grid .card h3 { font-size: 18px; }
+html[data-theme="bauhaus"] .dash-grid .card:first-child { background: var(--yellow); padding: 14px 18px 18px; }
+html[data-theme="bauhaus"] .hero-label { color: var(--black); font-weight: 800; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; }
+html[data-theme="bauhaus"] .hero-n { font: 400 132px/.85 var(--display); letter-spacing: -.05em; margin: 18px 0 14px; color: var(--black); }
+html[data-theme="bauhaus"] .hero-sub { color: var(--black); font-weight: 600; }
+html[data-theme="bauhaus"] .stage-bars { gap: 6px; }
+html[data-theme="bauhaus"] .stage-bars button { border-radius: 0; padding: 0; grid-template-columns: 112px 1fr; }
+html[data-theme="bauhaus"] .stage-bars button:hover { background: none; }
+html[data-theme="bauhaus"] .stage-bars button:hover .l { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+html[data-theme="bauhaus"] .stage-bars .l { color: var(--black); font-weight: 700; }
+html[data-theme="bauhaus"] .stage-bars .track { gap: 0; border-left: 2px solid var(--black); }
+html[data-theme="bauhaus"] .stage-bars .bar { height: 30px; border-radius: 0; background: var(--c); }
+html[data-theme="bauhaus"] .stage-bars .bar.zero { width: 0 !important; }
+html[data-theme="bauhaus"] .stage-bars .v { font: 400 24px/1 var(--display); margin-left: 8px; }
+html[data-theme="bauhaus"] .dash-foot { color: var(--black); }
+html[data-theme="bauhaus"] .day-chart .col { fill: var(--chart); }
+html[data-theme="bauhaus"] .day-chart .grid line { stroke: var(--grey); }
+html[data-theme="bauhaus"] .day-chart .grid line:last-child { stroke: var(--black); stroke-width: 2px; }
+html[data-theme="bauhaus"] .day-chart .axis text { fill: var(--black); font-weight: 600; }
+html[data-theme="bauhaus"] .day-chart .cap { font: 400 18px var(--display); fill: var(--black); }
+html[data-theme="bauhaus"] .day-chart .hit:hover, html[data-theme="bauhaus"] .day-chart .hit:focus-visible { fill: color-mix(in srgb, var(--yellow) 45%, transparent); }
+html[data-theme="bauhaus"] .dash-tip { border: 0; border-radius: 0; background: var(--black); color: var(--white); box-shadow: none; }
+html[data-theme="bauhaus"] .dash-tip .td { color: #DADADA; }
+html[data-theme="bauhaus"] .dash-tip .tv { font: 400 20px var(--display); color: var(--yellow); }
+html[data-theme="bauhaus"] .dash-table summary { color: var(--black); font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+html[data-theme="bauhaus"] .dash-table th { border-bottom: var(--rule); color: var(--black); }
+
 @media (max-width: 1100px) {
   html[data-theme="bauhaus"] .topbar { flex-wrap: wrap; padding-top: 8px; }
   html[data-theme="bauhaus"] .topbar .meta { margin-left: auto; }
@@ -379,6 +422,7 @@ html[data-theme="bauhaus"] .startups-body .detail .pad { background: var(--white
   html[data-theme="bauhaus"] .tabs button { min-height: 40px; }
   html[data-theme="bauhaus"] .stage .n { font-size: 48px; }
   html[data-theme="bauhaus"] .stage[data-kind="path"] { min-width: 88px; }
+  html[data-theme="bauhaus"] .stages .stage[data-kind="path"] { padding-inline: 8px; }
 }
 @media (max-width: 760px) {
   html[data-theme="bauhaus"] .stages { flex-wrap: wrap; height: auto; }

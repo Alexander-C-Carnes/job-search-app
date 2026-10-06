@@ -350,11 +350,12 @@ class JobBoard:
 
 
 def _tracker_fields(n: Optional[dict]) -> dict:
-    """tracker_id: the job is tracked. notion_page_id: its row exists in Notion. pending: it has a change Notion hasn't had yet."""
+    """tracker_id: the job is tracked. notion_page_id: its row exists in Notion. pending: it has a change Notion hasn't had yet.
+    applied_on: the day it was applied to (YYYY-MM-DD), for the dashboard."""
     if not n:
-        return {"tracker_id": None, "notion_page_id": None, "notion_url": None, "pending": False}
+        return {"tracker_id": None, "notion_page_id": None, "notion_url": None, "pending": False, "applied_on": ""}
     return {"tracker_id": n["page_id"], "notion_page_id": n["notion_page_id"], "notion_url": n["page_url"] or None,
-            "pending": n["pending"]}
+            "pending": n["pending"], "applied_on": n.get("applied_on", "")}
 
 
 def _mark_fields(m: dict) -> dict:

@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import config
 from ..config import Config
-from .. import jd
+from .. import jd, render
 from ..jd import MIN_PASTED_CHARS, build_jd, normalize_posting_url, posting_url
 from ..config import ModelCfg
 from ..llm import BACKEND_LABELS, CLAUDE_MODELS, PROVIDERS, AgentError, OpenAICompatRunner, Runner
@@ -312,8 +312,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             raise HTTPException(400, str(e)) from None
         except KeyError:
             raise HTTPException(404, "That job isn't in the tracker.") from None
-        if body.get("status") in ("Applied", "Denied"):
-            # Marked Applied (or Denied, which means it was sent): keep the résumé it was sent with, unless one is already on file.
+        if body.get("status") in ("Applied", "Waiting", "Interviewing", "Offer", "Denied"):
+            # Marked Applied (or a later stage, which means it was sent): keep the résumé it was sent with, unless one is already on file.
             row = board.by_tracker(row_id)
             if row and not sent_info(row)[0]:
                 try:
@@ -341,14 +341,17 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             notes = (f"Scored {today} · Tailored resume {sc.get('resume_score') or '?'}/10 · "
                      f"ATS {round(sc['ats_total']) if sc.get('ats_total') is not None else 'n/a'}% · {where}")
         else:
-            # The full score where there is one, else the signal score.
+            # The full score where there is one (it replaces the signal score), else the signal score.
             fit = row["impact_score"] if row["impact_score"] is not None else tri.get("fit_score")
             fit = float(fit) if fit is not None else None
-            notes = f"Triaged {today} · Quick fit {tri.get('fit_score', '?')}/10 · {tri.get('one_line', '')} · {where}"
+            notes = (f"Scored {today} · Full score {row['impact_score']}/10 · {where}" if row["impact_score"] is not None else
+                     f"Triaged {today} · Quick fit {tri.get('fit_score', '?')}/10 · {tri.get('one_line', '')} · {where}")
         body = [f"**Posting:** {row['url']}"]
         if row.get("funding"):
             body.append(f"**Funding:** {row['funding']['line']}" + (f" {row['funding']['url']}" if row["funding"].get("url") else ""))
-        if tri.get("one_line"):
+        if row["impact_score"] is not None:
+            body.append(f"**Full score:** {row['impact_score']}/10.")
+        elif tri.get("one_line"):
             body.append(f"**Quick fit:** {tri.get('fit_score')}/10. {tri['one_line']}")
         if tri.get("strongest_matches"):
             body.append("**Strongest matches:** " + "; ".join(tri["strongest_matches"]))
@@ -749,6 +752,30 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     @app.get("/api/jobs/{jid}/resume/{n}.md")
     def resume_md(jid: str, n: int):
         return {"markdown": workspace(jid).md(n)}
+
+    # ---- edits by hand ---------------------------------------------------------------------
+    @app.get("/api/jobs/{jid}/resume/page")
+    def resume_page(jid: str):
+        """The current version drawn in the PDF's layout, every line click-to-edit, plus its markdown."""
+        ws = workspace(jid)
+        h = ws.history()
+        md = ws.md(h["current"])
+        return {"n": h["current"], "html": render.render(md, editable=True), "markdown": md,
+                "proposal": bool(h.get("proposal"))}
+
+    @app.post("/api/jobs/{jid}/resume/page")
+    def save_resume_page(jid: str, body: dict):
+        """Save an edit made by hand: {"base": n, "edits": [...]} from the page, or {"base": n, "markdown": str}."""
+        if state["edit_locks"].get(jid) and state["edit_locks"][jid].locked():
+            raise HTTPException(409, "Claude is still answering; wait for the reply, then save.")
+        ws = workspace(jid)
+        try:
+            base = int(body.get("base", 0))
+            if isinstance(body.get("markdown"), str):
+                return ws.save_text(base, body["markdown"])
+            return ws.save_page_edits(base, list(body.get("edits") or []))
+        except (EditError, ValueError, TypeError) as e:
+            raise HTTPException(400, str(e)) from None
 
     # ---- chat and edits --------------------------------------------------------------------
     # POST /edit sends one chat message; Claude replies, and proposes an edit only when asked for one.

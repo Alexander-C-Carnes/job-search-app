@@ -163,6 +163,8 @@ window.Look = (() => {
     return counts.out <= 1 ? `Sent to ${who(job)}. That's the first one out the door.` : `Sent to ${who(job)}. That's ${counts.out} out the door.`;
   }
   const doneWords = (job) => `Done: ${job.title || "this role"}${job.company ? ` at ${job.company}` : ""}.`;
+  const interviewingWords = (job) => `Interviewing at ${who(job)}. Go get them.`;
+  const offerWords = (job) => `An offer from ${who(job)}!`;
   function deniedWords(job, counts) {
     return { lead: `${who(job)} passed.`,
              rest: counts.inPlay ? ` The cat is sad too. ${counts.inPlay} still in play.` : " The cat is sad too. Time to find more roles." };
@@ -193,13 +195,19 @@ window.Look = (() => {
   const standard = {
     applied({ job, counts, anchor, theme }) { confetti(anchor.x, anchor.y, theme.confetti, { count: 220 }); banner(appliedWords(job, counts), "applied"); },
     done({ job, theme }) { confetti(innerWidth / 2, 90, theme.confetti, { count: 90, size: 0.8, spread: 1.4 }); banner(doneWords(job), "done", 3200); },
+    interviewing({ job, anchor, theme }) { confetti(anchor.x, anchor.y, theme.confetti, { count: 140 }); banner(interviewingWords(job), "interviewing"); },
+    offer({ job, anchor, theme }) {
+      confetti(anchor.x, anchor.y, theme.confetti, { count: 260 });
+      confetti(innerWidth / 2, 90, theme.confetti, { count: 200, spread: 1.6 });
+      banner(offerWords(job), "offer", 6000);
+    },
     denied({ job, counts, theme }) { catCard({ svg: CATS[theme.id] || CATS.sorbet, ...deniedWords(job, counts) }); },
   };
   const RENDER = { sorbet: standard, classic: standard };
 
   // After a status change. Returns true when the look showed something, so app.js can skip its plain toast.
   function status({ job, status, counts }) {
-    const kind = status === "Applied" ? "applied" : status === "Done" ? "done" : status === "Denied" ? "denied" : null;
+    const kind = { Applied: "applied", Done: "done", Denied: "denied", Interviewing: "interviewing", Offer: "offer" }[status] || null;
     if (!kind || !job) return false;
     const theme = byId(current());
     const r = RENDER[theme.id] || standard;
@@ -213,7 +221,8 @@ window.Look = (() => {
 
   // ---- more looks -------------------------------------------------------------------------------------
   // A look in its own file (static/themes/<id>.js, loaded after this one) registers itself:
-  //   Look.register({ id, name, blurb, swatches, confetti, cat: "<svg…>", render: { applied(ctx), done(ctx), denied(ctx) } })
+  //   Look.register({ id, name, blurb, swatches, confetti, cat: "<svg…>",
+  //                   render: { applied(ctx), done(ctx), denied(ctx), interviewing(ctx), offer(ctx) } })
   // Any renderer it leaves out falls back to the standard one; `cat` is the SVG the standard denied moment shows.
   // The picker lists looks in the order they register, Classic last.
   function register(def) {
@@ -241,5 +250,5 @@ window.Look = (() => {
   });
 
   return { THEMES, current, set, register, renderPicker, status, sparkle, fly, confetti, banner, catCard, hideAll, hideCat, hideBanner,
-           standard, CATS, RENDER, RM, h, words: { appliedWords, doneWords, deniedWords, who } };
+           standard, CATS, RENDER, RM, h, words: { appliedWords, doneWords, deniedWords, interviewingWords, offerWords, who } };
 })();
