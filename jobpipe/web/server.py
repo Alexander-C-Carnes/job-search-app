@@ -341,7 +341,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             raise HTTPException(400, str(e)) from None
         except KeyError:
             raise HTTPException(404, "That job isn't in the tracker.") from None
-        if body.get("status") in ("Applied", "Waiting", "Interviewing", "Offer", "Denied"):
+        if body.get("status") in ("Applied", "Interviewing", "Offer", "Denied"):
             # Marked Applied (or a later stage, which means it was sent): keep the résumé it was sent with, unless one is already on file.
             row = board.by_tracker(row_id)
             if row and not sent_info(row)[0]:

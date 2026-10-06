@@ -25,7 +25,7 @@ html[data-theme="transit"] {
   --fit-hi-bg: #0B1F3A; --fit-hi: #FFFFFF; --fit-mid-bg: #6B7A90; --fit-mid: #FFFFFF; --fit-lo-bg: #CBD5E0; --fit-lo: #0B1F3A;
   --st-untracked: #6B7A90; --st-not-started: #DDAA00; --st-in-progress: #F4520A; --st-blocked: #57ADDB;
   --st-applied: #00A862; --st-done: #0066CC; --st-denied: #AC64BB; --st-not-applying: #925720;
-  --st-waiting: #A0A5A9; --st-interviewing: #00A4A7; --st-offer: #F3A9BB;
+  --st-interviewing: #00A4A7; --st-offer: #F3A9BB;
   --chart: #0066CC;
   --board: #0E1E38; --board-cell: #1A2C4C; --board-text: #FFD60A;
   --shadow: 0 1px 0 rgba(11, 31, 58, .08), 0 6px 18px rgba(11, 31, 58, .08);
@@ -42,7 +42,6 @@ html[data-theme="transit"] .quick[data-to="Not started"] { --c: var(--st-not-sta
 html[data-theme="transit"] .quick[data-to="In progress"] { --c: var(--st-in-progress); }
 html[data-theme="transit"] .quick[data-to="Blocked"] { --c: var(--st-blocked); }
 html[data-theme="transit"] .quick[data-to="Applied"] { --c: var(--st-applied); }
-html[data-theme="transit"] .quick[data-to="Waiting"] { --c: var(--st-waiting); }
 html[data-theme="transit"] .quick[data-to="Interviewing"] { --c: var(--st-interviewing); }
 html[data-theme="transit"] .quick[data-to="Offer"] { --c: var(--st-offer); }
 html[data-theme="transit"] .quick[data-to="Denied"] { --c: var(--st-denied); }
@@ -109,7 +108,7 @@ html[data-theme="transit"] .chip[aria-pressed="true"] b { color: var(--board-tex
 html[data-theme="transit"] .chip.round-chip[aria-pressed="false"] { color: var(--ink); }
 html[data-theme="transit"] .chip.round-chip[aria-pressed="false"]::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--r); box-shadow: 0 0 0 1.5px var(--ink); }
 
-/* the pipeline: a transit line on a white sign. The main line runs through the seven path stations;
+/* the pipeline: a transit line on a white sign. The main line runs through the six path stations;
    the three exits sit on a siding below it, reached by a curve after Done. Each station is a roundel
    with its count, its line colour as the ring and ink as the casing, over its name. */
 html[data-theme="transit"] .stage-wrap { flex: 1 1 620px; min-width: 0; }
@@ -125,7 +124,6 @@ html[data-theme="transit"] .stage[data-kind="side"] { flex: 0 0 84px; padding-to
 html[data-theme="transit"] .stage[data-stage="Not started"] { order: 1; }
 html[data-theme="transit"] .stage[data-stage="In progress"] { order: 2; }
 html[data-theme="transit"] .stage[data-stage="Applied"] { order: 3; }
-html[data-theme="transit"] .stage[data-stage="Waiting"] { order: 4; }
 html[data-theme="transit"] .stage[data-stage="Interviewing"] { order: 5; }
 html[data-theme="transit"] .stage[data-stage="Offer"] { order: 6; }
 html[data-theme="transit"] .stage[data-stage="Done"] { order: 7; }

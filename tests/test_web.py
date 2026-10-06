@@ -840,7 +840,7 @@ def test_denied_without_marking_applied_keeps_the_resume_sent(env):
 def test_interviewing_counts_as_applied_with_its_day(env):
     c = env["client"]
     statuses = c.get("/api/summary", headers=H).json()["statuses"]
-    assert {"Waiting", "Interviewing", "Offer"} <= set(statuses)
+    assert {"Interviewing", "Offer"} <= set(statuses) and "Waiting" not in statuses
     jobs = lambda: {j["id"]: j for j in c.get("/api/jobs?wait=1", headers=H).json()["jobs"]}
     assert jobs()["j1"]["applied_on"] == ""
     # straight to Interviewing: it was sent, so the résumé is kept and the day it was applied to is today

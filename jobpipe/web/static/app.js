@@ -91,14 +91,14 @@ function formError(form, msg) {
 }
 
 // ---- app state -------------------------------------------------------------------------
-const STAGES = ["Not started", "In progress", "Blocked", "Applied", "Waiting", "Interviewing", "Offer", "Denied", "Done", "Not Applying"];
+const STAGES = ["Not started", "In progress", "Blocked", "Applied", "Interviewing", "Offer", "Denied", "Done", "Not Applying"];
 // The stages that mean the application was sent (APPLIED_STATUSES in jobpipe/notion.py).
-const APPLIED_STAGES = ["Applied", "Waiting", "Interviewing", "Offer", "Denied", "Done"];
+const APPLIED_STAGES = ["Applied", "Interviewing", "Offer", "Denied", "Done"];
 // The main line, in order, and the exits off it: how the stage strip and a role's stage path draw them.
-const PATH = ["Not started", "In progress", "Applied", "Waiting", "Interviewing", "Offer", "Done"];
+const PATH = ["Not started", "In progress", "Applied", "Interviewing", "Offer", "Done"];
 const EXITS = ["Blocked", "Denied", "Not Applying"];
 const STAGE_BLURB = { "Not started": "Tracked, nothing done yet", "In progress": "Scoring or tailoring the résumé", Blocked: "Waiting on something",
-                      Applied: "Application sent", Waiting: "Heard back, waiting on the next step", Interviewing: "In interviews",
+                      Applied: "Application sent", Interviewing: "In interviews",
                       Offer: "They made an offer", Denied: "They said no", Done: "Interviews finished or closed out", "Not Applying": "Ruled out" };
 // The two job lists: what's in the tracker, and what the searches found that isn't tracked yet.
 // The tracker is kept on this Mac (tracker_id); Notion is its synced copy (notion_page_id, once the row is there).
@@ -187,7 +187,7 @@ const stageOf = (j) => j.status || "Not started";
 function stageCounts() {
   const tracked = S.jobs.filter((j) => SCOPES.tracker.has(j));
   const n = (...st) => tracked.filter((j) => st.includes(stageOf(j))).length;
-  return { out: n(...APPLIED_STAGES), inPlay: n("Not started", "In progress", "Blocked", "Applied", "Waiting", "Interviewing", "Offer"),
+  return { out: n(...APPLIED_STAGES), inPlay: n("Not started", "In progress", "Blocked", "Applied", "Interviewing", "Offer"),
            applied: n("Applied"), done: n("Done"), denied: n("Denied"), interviewing: n("Interviewing"), offer: n("Offer") };
 }
 function indexJob(j) {
@@ -478,7 +478,7 @@ $("#refresh-jobs").addEventListener("click", () => loadJobs({ refresh: true, ann
 // ---- dashboard -------------------------------------------------------------------------------
 // Counted from the tracked jobs on screen. applied_on is the day a job reached an applied stage, or its
 // Due/Submitted day in Notion (see _applied_on in jobpipe/tracker.py).
-const DASH_STAGES = [["In progress", "In progress"], ["Applied", "Applied"], ["Waiting", "Waiting"],
+const DASH_STAGES = [["In progress", "In progress"], ["Applied", "Applied"],
                      ["Interviewing", "Interviewing"], ["Offer", "Offer"], ["Denied", "Rejected"]];
 const DASH_RANGES = [["14", "14 days"], ["30", "30 days"], ["all", "All"]];
 const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -1030,8 +1030,7 @@ function quickStatus(j) {
   const go = (label, status, cls = "ghost small") => h("button", { class: `quick ${cls}`, "data-to": status, onclick: () => setStatus(j, status) }, label);
   switch (stageOf(j)) {
     case "Not started": case "In progress": case "Blocked": return [go("Mark applied", "Applied", "primary small")];
-    case "Applied": return [go("Interviewing", "Interviewing", "primary small"), go("Waiting", "Waiting"), go("Denied", "Denied")];
-    case "Waiting": return [go("Interviewing", "Interviewing", "primary small"), go("Denied", "Denied")];
+    case "Applied": return [go("Interviewing", "Interviewing", "primary small"), go("Denied", "Denied")];
     case "Interviewing": return [go("Offer", "Offer", "primary small"), go("Denied", "Denied")];
     case "Offer": return [go("Mark done", "Done")];
     default: return [go("Back to in progress", "In progress")];

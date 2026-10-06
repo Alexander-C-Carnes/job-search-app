@@ -24,7 +24,7 @@ html[data-theme="arcade"] {
   --fit-hi-bg: #15AC7D; --fit-hi: #1B1B4D; --fit-mid-bg: #DDAD0F; --fit-mid: #1B1B4D; --fit-lo-bg: #C9D6E8; --fit-lo: #1B1B4D;
   --st-untracked: #8A9BB0; --st-not-started: #12A9DB; --st-in-progress: #EF6505; --st-blocked: #A3602F;
   --st-applied: #15AC7D; --st-done: #DDAD0F; --st-denied: #8B5DCE; --st-not-applying: #186A99;
-  --st-waiting: #B8C4D6; --st-interviewing: #FF2D95; --st-offer: #FFD500;
+  --st-interviewing: #FF2D95; --st-offer: #FFD500;
   --chart: #0E58A8;
   --shadow: 4px 4px 0 var(--ink);
   --radius: 0px;
@@ -126,7 +126,6 @@ html[data-theme="arcade"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1
 html[data-theme="arcade"] .stage[data-stage="Not started"] { order: 1; margin-left: 0; }
 html[data-theme="arcade"] .stage[data-stage="In progress"] { order: 2; }
 html[data-theme="arcade"] .stage[data-stage="Applied"] { order: 3; }
-html[data-theme="arcade"] .stage[data-stage="Waiting"] { order: 4; }
 html[data-theme="arcade"] .stage[data-stage="Interviewing"] { order: 5; }
 html[data-theme="arcade"] .stage[data-stage="Offer"] { order: 6; }
 html[data-theme="arcade"] .stage[data-stage="Done"] { order: 7; }
@@ -422,7 +421,7 @@ html[data-theme="arcade"] .dash-tip { border: var(--px) solid var(--ink); border
 html[data-theme="arcade"] .dash-tip .tv { font: 400 12px/1.5 var(--pixel); }
 html[data-theme="arcade"] .dash-table summary { color: var(--link); font-weight: 500; }
 
-/* seven segments on the main line: the bar takes its own row and each segment stacks its count over its
+/* six segments on the main line: the bar takes its own row and each segment stacks its count over its
    name, like the exit tiles, so every name fits */
 html[data-theme="arcade"] .jobs-tools .tools-row:has(> .stage-wrap) { flex-wrap: wrap; }
 html[data-theme="arcade"] .stage-wrap { flex-basis: 100%; }

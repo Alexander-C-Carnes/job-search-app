@@ -25,13 +25,12 @@ from .store import canonical_url
 
 API = "https://api.notion.com/v1"
 VERSION = "2025-09-03"  # data-source API
-# "Waiting": applied and heard back, waiting on the next step. "Interviewing" and "Offer" follow it.
+# "Interviewing" and "Offer" follow "Applied".
 # "Denied": applied and turned down, e.g. not offered an interview (the dashboard calls it Rejected).
 # "Not Applying": ruled out (a poor fit, or little chance of an interview). Kept so it isn't found and scored again.
-STATUSES = ("Not started", "In progress", "Blocked", "Applied", "Waiting", "Interviewing", "Offer", "Denied", "Done",
-            "Not Applying")
+STATUSES = ("Not started", "In progress", "Blocked", "Applied", "Interviewing", "Offer", "Denied", "Done", "Not Applying")
 # The stages that mean the application was sent: they count as applied on the dashboard.
-APPLIED_STATUSES = ("Applied", "Waiting", "Interviewing", "Offer", "Denied", "Done")
+APPLIED_STATUSES = ("Applied", "Interviewing", "Offer", "Denied", "Done")
 SCORE_NOTE_RE = re.compile(r"(?:Scored|Triaged) \d{4}-\d{2}-\d{2}[^\n]*")
 
 

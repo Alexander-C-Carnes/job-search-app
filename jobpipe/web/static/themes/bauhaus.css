@@ -20,7 +20,7 @@ html[data-theme="bauhaus"] {
   --fit-hi-bg: #19B36B; --fit-hi: #000000; --fit-mid-bg: #FFD400; --fit-mid: #000000; --fit-lo-bg: #FF4F1F; --fit-lo: #000000;
   --st-untracked: #E9E9E9; --st-not-started: #FFD400; --st-in-progress: #FF4F1F; --st-blocked: #E3D7C3;
   --st-applied: #19B36B; --st-done: #2E6BFF; --st-denied: #8FA5C6; --st-not-applying: #E9E9E9;
-  --st-waiting: #FFE98A; --st-interviewing: #9B7BFF; --st-offer: #FF77B7;
+  --st-interviewing: #9B7BFF; --st-offer: #FF77B7;
   --chart: #2E6BFF;
   --rd-pre-seed: #E3D7C3; --rd-seed: #FFD400; --rd-a: #19B36B; --rd-b: #2E6BFF; --rd-c: #FF77B7; --rd-d: #FF4F1F; --rd-growth: #8FA5C6; --rd-unknown: #E9E9E9;
   --shadow: none;
@@ -121,7 +121,6 @@ html[data-theme="bauhaus"] .stage[data-kind="side"] { flex: 0 0 84px; width: 84p
 html[data-theme="bauhaus"] .stage[data-stage="Not started"] { order: 1; }
 html[data-theme="bauhaus"] .stage[data-stage="In progress"] { order: 2; }
 html[data-theme="bauhaus"] .stage[data-stage="Applied"] { order: 3; }
-html[data-theme="bauhaus"] .stage[data-stage="Waiting"] { order: 4; }
 html[data-theme="bauhaus"] .stage[data-stage="Interviewing"] { order: 5; }
 html[data-theme="bauhaus"] .stage[data-stage="Offer"] { order: 6; }
 html[data-theme="bauhaus"] .stage[data-stage="Done"] { order: 7; }
@@ -287,7 +286,6 @@ html[data-theme="bauhaus"] .meter .track::before { content: ""; position: absolu
 html[data-theme="bauhaus"] button.quick { background: var(--grey); color: var(--black); font-weight: 700; box-shadow: none; }
 html[data-theme="bauhaus"] button.quick.small { padding: 7px 12px; font-size: 12.5px; }
 html[data-theme="bauhaus"] button.quick[data-to="Applied"] { background: var(--green); }
-html[data-theme="bauhaus"] button.quick[data-to="Waiting"] { background: var(--st-waiting); }
 html[data-theme="bauhaus"] button.quick[data-to="Interviewing"] { background: var(--st-interviewing); }
 html[data-theme="bauhaus"] button.quick[data-to="Offer"] { background: var(--st-offer); }
 html[data-theme="bauhaus"] button.quick[data-to="Done"] { background: var(--blue); }

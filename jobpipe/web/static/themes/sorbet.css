@@ -17,7 +17,7 @@ html[data-theme="sorbet"] {
   --fit-hi-bg: #75CB33; --fit-hi: #2A1B3D; --fit-mid-bg: #FF9F1C; --fit-mid: #2A1B3D; --fit-lo-bg: #D9D0EA; --fit-lo: #2A1B3D;
   --st-untracked: #B7AECB; --st-not-started: #A682E1; --st-in-progress: #E96500; --st-blocked: #CEAD59;
   --st-applied: #75CB33; --st-done: #00A5E7; --st-denied: #C5617C; --st-not-applying: #7062A6;
-  --st-waiting: #FFC94D; --st-interviewing: #2EC4B6; --st-offer: #FF3E7F;
+  --st-interviewing: #2EC4B6; --st-offer: #FF3E7F;
   --chart: #FF3E7F;
   --shadow: 0 1px 2px rgba(42, 27, 61, .06), 0 8px 24px rgba(42, 27, 61, .08);
   --radius: 18px;
@@ -85,7 +85,6 @@ html[data-theme="sorbet"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 0
 html[data-theme="sorbet"] .stage[data-stage="Not started"] { order: 1; z-index: 7; }
 html[data-theme="sorbet"] .stage[data-stage="In progress"] { order: 2; z-index: 6; }
 html[data-theme="sorbet"] .stage[data-stage="Applied"] { order: 3; z-index: 5; }
-html[data-theme="sorbet"] .stage[data-stage="Waiting"] { order: 4; z-index: 4; }
 html[data-theme="sorbet"] .stage[data-stage="Interviewing"] { order: 5; z-index: 3; }
 html[data-theme="sorbet"] .stage[data-stage="Offer"] { order: 6; z-index: 2; }
 html[data-theme="sorbet"] .stage[data-stage="Done"] { order: 7; z-index: 1; }

@@ -17,7 +17,7 @@
   --fit-hi-bg: #dcf2e3; --fit-hi: #11612a; --fit-mid-bg: #fdf0d3; --fit-mid: #7a4a00; --fit-lo-bg: #f7e1e1; --fit-lo: #8a1c1c;
   --st-untracked: #8d94a0; --st-not-started: #55637d; --st-in-progress: #1d5fd0;
   --st-blocked: #c2540a; --st-applied: #0e8a5c; --st-done: #7446d0; --st-denied: #b8423a; --st-not-applying: #8d94a0;
-  --st-waiting: #9a6b00; --st-interviewing: #0a7c94; --st-offer: #b5307a;
+  --st-interviewing: #0a7c94; --st-offer: #b5307a;
   --chart: #1d5fd0;            /* the dashboard's one series hue (checked with the dataviz validator) */
   --shadow: 0 1px 2px rgba(16, 20, 28, .06), 0 6px 20px rgba(16, 20, 28, .06);
   --radius: 10px;
@@ -33,7 +33,7 @@
     --fit-hi-bg: #1b3a25; --fit-hi: #9be0ad; --fit-mid-bg: #3d3115; --fit-mid: #f3cc7b; --fit-lo-bg: #3f2222; --fit-lo: #f3a6a1;
     --st-untracked: #7d8491; --st-not-started: #93a1bd; --st-in-progress: #6ea8ff;
     --st-blocked: #f08a4b; --st-applied: #4fd0a0; --st-done: #a98bf5; --st-denied: #f0918a; --st-not-applying: #7d8491;
-    --st-waiting: #e8be55; --st-interviewing: #5cc6dd; --st-offer: #f07ab5;
+    --st-interviewing: #5cc6dd; --st-offer: #f07ab5;
     --chart: #4f8fef;
     --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 24px rgba(0, 0, 0, .35);
     color-scheme: dark;
@@ -77,7 +77,6 @@
 [data-stage="In progress"] { --c: var(--st-in-progress); }
 [data-stage="Blocked"] { --c: var(--st-blocked); }
 [data-stage="Applied"] { --c: var(--st-applied); }
-[data-stage="Waiting"] { --c: var(--st-waiting); }
 [data-stage="Interviewing"] { --c: var(--st-interviewing); }
 [data-stage="Offer"] { --c: var(--st-offer); }
 [data-stage="Done"] { --c: var(--st-done); }
@@ -190,7 +189,7 @@ label.inline input { width: 56px; margin: 0; }
 
 /* the pipeline: stage counts that filter, over a strip of the same counts drawn to scale */
 .stage-wrap { flex: 1; min-width: 0; }
-/* as many columns as fit (ten stages need about 1150px); each stage draws its own left and top rule, so a
+/* as many columns as fit (nine stages need about 1030px); each stage draws its own left and top rule, so a
    wrapped row is ruled like the first */
 .stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); background: var(--panel); border: 1px solid var(--line); border-width: 0 1px 0 0; border-radius: 9px 9px 0 0; overflow: hidden; }
 .stage { border: 0; border-left: 1px solid var(--line); border-top: 1px solid var(--line); background: none; padding: 7px 12px 6px; text-align: left; display: flex; align-items: baseline; gap: 8px; min-width: 0; }

@@ -12,7 +12,7 @@ status works at once and offline. The Notion tracker is a synced copy:
 
 When Notion can't be reached nothing is lost: the queue waits and the next sync sends it.
 
-Each row also keeps the day it reached an applied stage (Applied, Waiting, ... see APPLIED_STATUSES),
+Each row also keeps the day it reached an applied stage (Applied, Interviewing, ... see APPLIED_STATUSES),
 set here or by a sync, for the dashboard's applications per day.
 """
 from __future__ import annotations
