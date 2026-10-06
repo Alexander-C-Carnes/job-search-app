@@ -124,15 +124,44 @@ def load_token(data_dir: Path) -> str:
     return tok
 
 
+FACTS_HEADING = re.compile(r"^#\s+confirmed facts\s*#*\s*$", re.I)
+
+
+def add_confirmed_fact(md: str, text: str, day: date, first_name: str) -> str:
+    """The impact record with one dated, user-confirmed fact appended to its top-level Confirmed facts
+    section, which is added at the end if it isn't there yet."""
+    fact = re.sub(r"\s*\n\s*", " ", text.strip())
+    item = f"- **{day:%b} {day.day}, {day.year}, user-confirmed:** {fact}"
+    lines, fenced, start, end = md.rstrip("\n").split("\n"), False, None, None
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*(```|~~~)", line):
+            fenced = not fenced
+        elif not fenced and start is None and FACTS_HEADING.match(line):
+            start = i
+        elif not fenced and start is not None and re.match(r"^#\s", line):
+            end = i
+            break
+    if start is None:
+        intro = (f"Answers {first_name} gave to follow-up questions. Every score, tailoring run and résumé edit "
+                 "treats them as user-confirmed evidence, at exactly the scope stated.")
+        return md.rstrip("\n") + f"\n\n# Confirmed facts\n\n{intro}\n\n{item}\n"
+    after = lines[end:] if end is not None else []    # the next top-level heading on
+    end = len(lines) if end is None else end
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    in_list = re.match(r"^(\s*([-*+]|\d+[.)])\s|\s{2,}\S)", lines[end - 1])   # an item, or an item's wrapped line
+    gap = [] if in_list else [""]                     # a list after a paragraph needs a blank line
+    return "\n".join([*lines[:end], *gap, item, *([""] + after if after else [])]) + "\n"
+
+
 def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
                tracker: Optional[NotionTracker | LocalTracker] = None, runner_factory=None,
                runs: Optional[RunManager] = None, allowed_hosts: Optional[set[str]] = None,
-               searches_path: Optional[Path] = None, notes_path: Optional[Path] = None,
+               searches_path: Optional[Path] = None,
                resume_root: Optional[Path] = None, impact_path: Optional[Path] = None,
                prep_path: Optional[Path] = None) -> FastAPI:
     store = store or Store()
     searches_path = searches_path or config.searches_path()
-    notes_path = notes_path or config.REFERENCES / "user-notes.md"
     impact_path = impact_path or config.REFERENCES / "impact-record.md"
     prep_path = prep_path or store.root / "interview-prep.md"   # personal notes, in the profile's data/
     allowed = allowed_hosts or {"127.0.0.1", "localhost"}
@@ -1365,14 +1394,18 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             if doc_version(current) != body.get("version") and not body.get("force"):
                 return JSONResponse({"detail": f"The {label} was changed outside this window since you opened it.",
                                      "current": payload(current)}, status_code=409)
-            if text != current:
-                if current:
-                    snapshot(current)
-                path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = path.with_name(f".{path.name}.tmp")
-                tmp.write_text(text)
-                os.replace(tmp, path)
+            write(text, current)
             return payload(text)
+
+        def write(text: str, current: str) -> None:
+            if text == current:
+                return
+            if current:
+                snapshot(current)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f".{path.name}.tmp")
+            tmp.write_text(text)
+            os.replace(tmp, path)
 
         def preview_doc(body: dict):
             return {"html": md_html(str(body.get("markdown") or ""))}
@@ -1380,27 +1413,27 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         app.get(f"/api/{route}")(get_doc)
         app.put(f"/api/{route}")(save_doc)
         app.post(f"/api/{route}/preview")(preview_doc)
+        return read, write, payload
 
-    markdown_doc("impact-record", impact_path, "impact record")
+    read_impact, write_impact, impact_payload = markdown_doc("impact-record", impact_path, "impact record")
     markdown_doc("interview-prep", prep_path, "interview prep", allow_empty=True, starter=INTERVIEW_PREP_STARTER)
 
-    # ---- user-confirmed notes ----------------------------------------------------------------
-    @app.get("/api/notes")
-    def get_notes():
-        return {"markdown": notes_path.read_text() if notes_path.exists() else ""}
-
-    @app.post("/api/notes")
-    def add_note(body: dict):
+    # ---- confirmed facts: answers to follow-up questions, kept in the impact record ---------------------
+    @app.post("/api/impact-record/facts")
+    def add_fact(body: dict):
+        """Add a dated user-confirmed fact to the record's Confirmed facts section. `version` is the record
+        the app has open; a different one on disk is a 409, as for a save."""
         text = (body.get("text") or "").strip()
         if not text:
             raise HTTPException(400, "Write the fact to record.")
-        if not notes_path.exists():
-            notes_path.write_text(f"# User-confirmed notes\n\nAnswers {config.candidate().first_name} gave to follow-up questions. "
-                                  "Every run treats these as user-confirmed evidence at exactly the scope stated.\n")
-        with notes_path.open("a") as f:
-            f.write(f"\n- **{date.today().isoformat()}:** {text}\n")
-        state["runner"] = None  # the cached system prompt includes these notes
-        return get_notes()
+        current = read_impact()
+        if doc_version(current) != body.get("version"):
+            return JSONResponse({"detail": "The impact record was changed outside this window since you opened it.",
+                                 "current": impact_payload(current)}, status_code=409)
+        new = add_confirmed_fact(current, text, date.today(), config.candidate().first_name)
+        write_impact(new, current)
+        state["runner"] = None  # the cached system prompt includes the record
+        return impact_payload(new)
 
     return app
 

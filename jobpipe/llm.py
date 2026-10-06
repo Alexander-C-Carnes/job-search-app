@@ -72,7 +72,7 @@ def candidate_materials() -> str:
     ]
     for source, fname in cand.resumes.items():
         parts.append(doc(f"<skill>/references/{fname} [{source}]", (ref / fname).read_text()))
-    notes = ref / "user-notes.md"
+    notes = ref / "user-notes.md"           # confirmed facts, where an older version of the app kept them
     if notes.exists():
         parts.append(doc("user-notes.md [user-confirmed answers]", notes.read_text()))
     parts.append(doc("<skill>/references/resume-rules.md", cand.personalize((method / "resume-rules.md").read_text())))

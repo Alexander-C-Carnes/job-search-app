@@ -84,10 +84,10 @@ def env(tmp_dirs, tmp_path):
     impact.write_text("# Impact record\n\n## Northwind\n\nLed 22 teams.\n")
     app = create_app(cfg, token=TOKEN, store=store, tracker=tracker,
                      runner_factory=lambda cfg: runner, runs=runs, allowed_hosts={"testserver"},
-                     searches_path=searches, notes_path=tmp_path / "user-notes.md", resume_root=tmp_path / "repo",
+                     searches_path=searches, resume_root=tmp_path / "repo",
                      impact_path=impact)
     return {"client": TestClient(app), "app": app, "cfg": cfg, "notion": notion, "tracker": tracker, "runner": runner, "runs": runs, "pdf": pdf,
-            "run_dir": run_dir, "searches": searches, "notes": tmp_path / "user-notes.md", "impact": impact, "store": store}
+            "run_dir": run_dir, "searches": searches, "impact": impact, "store": store}
 
 
 def test_auth_and_host_guard(env):
@@ -100,7 +100,7 @@ def test_auth_and_host_guard(env):
     assert c.get("/api/summary", headers=H).json()["credits"]["allowance"] == 1000
     # file links may carry the token as ?t= (GET only)
     assert c.get(f"/api/jobs/j1/resume/1.pdf?t={TOKEN}").status_code == 200
-    assert c.post(f"/api/notes?t={TOKEN}", json={"text": "x"}).status_code == 401
+    assert c.post(f"/api/impact-record/facts?t={TOKEN}", json={"text": "x"}).status_code == 401
 
 
 def test_job_board_merges_local_jobs_and_notion(env):
@@ -892,10 +892,32 @@ def test_overlapping_runs_keep_their_own_results(env, monkeypatch):
 
 
 def test_confirmed_facts(env):
-    c = env["client"]
-    assert c.post("/api/notes", headers=H, json={"text": ""}).status_code == 400
-    md = c.post("/api/notes", headers=H, json={"text": "At Fabrikam I didn't manage the vendor team."}).json()["markdown"]
-    assert "vendor team" in md and "User-confirmed notes" in env["notes"].read_text()
+    c, impact = env["client"], env["impact"]
+    v = c.get("/api/impact-record", headers=H).json()["version"]
+    assert c.post("/api/impact-record/facts", headers=H, json={"text": " ", "version": v}).status_code == 400
+    d = c.post("/api/impact-record/facts", headers=H,
+               json={"text": "At Fabrikam I didn't\nmanage the vendor team.", "version": v}).json()
+    assert d["markdown"] == impact.read_text() and d["version"] != v
+    assert impact.read_text().startswith("# Impact record\n\n## Northwind\n\nLed 22 teams.\n\n# Confirmed facts\n\n")
+    assert impact.read_text().endswith(", user-confirmed:** At Fabrikam I didn't manage the vendor team.\n")
+    assert list((env["store"].root / "impact-record-history").glob("*.md"))      # the text it replaced is kept
+    # a record changed since the app opened it isn't added to unseen
+    r = c.post("/api/impact-record/facts", headers=H, json={"text": "x y z", "version": v})
+    assert r.status_code == 409 and r.json()["current"]["version"] == d["version"]
+
+
+def test_add_confirmed_fact():
+    from jobpipe.web.server import add_confirmed_fact
+    day = date(2026, 10, 6)
+    item = "- **Oct 6, 2026, user-confirmed:** New one."
+    # into the existing section, before the next top-level heading
+    md = "# Work\n\nLed it.\n\n# Confirmed facts\n\nIntro.\n\n- **Sep 1, 2026, user-confirmed:** Old.\n\n\n# Bottom line\n\nEnd.\n"
+    assert add_confirmed_fact(md, "New one.", day, "Jordan") == md.replace("Old.\n\n\n", f"Old.\n{item}\n\n")
+    # a section with no list yet, at the end; a "# Confirmed facts" inside a code block doesn't count
+    assert add_confirmed_fact("# Confirmed facts\n\nIntro.", "New one.", day, "Jordan") == f"# Confirmed facts\n\nIntro.\n\n{item}\n"
+    out = add_confirmed_fact("# Work\n\n```\n# Confirmed facts\n```\n", "New one.", day, "Jordan")
+    assert out.endswith(f"```\n\n# Confirmed facts\n\nAnswers Jordan gave to follow-up questions. Every score, tailoring run "
+                        f"and résumé edit treats them as user-confirmed evidence, at exactly the scope stated.\n\n{item}\n")
 
 
 def test_loosen_lists_and_run_scores(tmp_path):

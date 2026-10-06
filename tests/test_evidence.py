@@ -174,3 +174,15 @@ def test_a_model_failure_mid_run_falls_back_to_the_figure_check(tmp_dirs):
     labels = [x.label for x in runner.calls]
     assert "honesty-fix" in labels and "merge-restore" not in labels
     assert "only figures were checked" in (c.tailored.run_dir / "honesty.md").read_text()
+
+
+def test_figures_in_confirmed_facts_count_for_every_line(tmp_path):
+    """With the models, a line's figures must be in its own evidence or a confirmed fact: the record's Confirmed
+    facts section or an older user-notes.md."""
+    md = "## EXPERIENCE\n- Built an automated weekly portfolio digest covering 18 programs for 37 directors.\n"
+    record = evidence.Passage("Impact record › Confirmed facts", "Oct 6, 2026, user-confirmed: the digest went to 37 directors.")
+    other = evidence.Passage("Impact record › Northwind", "The digest went to 37 directors.")
+    for extra, missing in ((record, []), (evidence.Passage("Confirmed facts", record.text), []), (other, ["37"])):
+        passages = [*evidence.candidate_passages(), extra]
+        index = evidence.Index(FakeModels(), passages, tmp_path / str(len(missing)) / extra.source[:5])
+        assert evidence.check_lines(md, "", "", passages, index, k=1)[0].missing_figures == missing

@@ -27,7 +27,7 @@ def set_profile(home: Path) -> None:
     """Point every profile path at this folder (the env-var overrides still win)."""
     global PROFILE, REFERENCES, RUNS, DATA, OUTPUTS
     PROFILE = Path(home).expanduser()
-    REFERENCES = PROFILE / "references"     # impact-record.md, resume-*.md, user-notes.md
+    REFERENCES = PROFILE / "references"     # impact-record.md, resume-*.md
     RUNS = PROFILE / "resume-runs"           # runs of the resume-job-fit skill done in Claude chats
     DATA = _env_path("JOBPIPE_DATA_DIR", PROFILE / "data")
     OUTPUTS = _env_path("JOBPIPE_OUTPUTS_DIR", PROFILE / "outputs")

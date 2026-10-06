@@ -30,7 +30,6 @@
       <button role="tab" data-tab="runs">Runs</button>
       <span class="tab-sep" aria-hidden="true"></span>
       <button role="tab" data-tab="impact">Impact record <span class="dirty-dot hidden" id="impact-dirty" title="Unsaved changes"></span></button>
-      <button role="tab" data-tab="notes">Confirmed facts</button>
       <button role="tab" data-tab="prep">Interview prep <span class="dirty-dot hidden" id="prep-dirty" title="Unsaved changes"></span></button>
       <span class="tab-sep" aria-hidden="true"></span>
       <button role="tab" data-tab="dashboard">Dashboard</button>
@@ -221,8 +220,16 @@
             <button data-view="edit" title="Edit the Markdown text">Markdown</button>
             <button data-view="split">Side by side</button>
           </div>
+          <button id="fact-open" class="ghost" aria-expanded="false" aria-controls="fact-box"
+                  title="Answer a fit report's follow-up question">Add a confirmed fact</button>
           <button id="impact-save" class="primary" title="Save now (⌘S)">Save</button>
         </div>
+        <form id="fact-box" class="fact-box hidden">
+          <label for="fact-text">Confirmed fact</label>
+          <p class="muted">An answer to a fit report's follow-up question, in your words. It goes at the end of the record under <b>Confirmed facts</b>, dated, and every score and résumé edit uses it at exactly the scope you write. Tailor a job again for its résumé to pick it up.</p>
+          <textarea id="fact-text" rows="2" placeholder="e.g. I ran the vendor migration at Northwind, but I didn't manage the vendor's team."></textarea>
+          <div class="actions"><button type="submit" class="primary">Add fact</button><button type="button" id="fact-cancel" class="ghost">Cancel</button></div>
+        </form>
         <div id="impact-conflict" class="doc-conflict hidden" role="alert">
           <span class="grow">The impact record was changed outside this window since you opened it, so your latest edits haven't been saved.</span>
           <button data-act="load" class="ghost small">Discard mine, load that version</button>
@@ -264,17 +271,6 @@
           <textarea id="prep-text" class="doc-text" spellcheck="true" aria-label="Interview prep (Markdown)"></textarea>
           <div id="prep-preview" class="doc-preview markdown"></div>
         </div>
-      </div>
-    </section>
-
-    <!-- Notes -->
-    <section id="tab-notes" class="tab-panel">
-      <div class="page narrow">
-        <h1>Confirmed facts</h1>
-        <p class="muted">Answers to follow-up questions. Every scoring run and résumé edit treats these as user-confirmed evidence, at exactly the scope you write them. Re-tailor a job for its résumé to pick them up.</p>
-        <textarea id="note-text" rows="3" placeholder="e.g. I ran the vendor migration at Northwind, but I didn't manage the vendor's team."></textarea>
-        <div class="actions"><button id="add-note" class="primary">Add fact</button></div>
-        <div id="notes" class="markdown"></div>
       </div>
     </section>
 

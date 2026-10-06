@@ -55,6 +55,7 @@ LINE_SEARCH = "Given a line from a resume, retrieve the passages of the candidat
 
 EXCLUDE_HEADING = re.compile(r"do not claim|withdrawn|data limitations|source inventory|methodology", re.I)
 EXCLUDE_BLOCK = re.compile(r"^\W*(do not claim|withdrawn|invalid)\b", re.I)
+CONFIRMED = re.compile(r"(^|› )(other )?(user-)?confirmed facts\b", re.I)   # the record's section, or user-notes.md
 PASSAGE_WORDS = 120
 
 
@@ -125,7 +126,7 @@ def materials() -> dict[str, str]:
     out = {config.IMPACT_SOURCE: (ref / "impact-record.md").read_text()}
     for source, fname in config.candidate().resumes.items():
         out[source] = (ref / fname).read_text()
-    if (ref / "user-notes.md").exists():
+    if (ref / "user-notes.md").exists():       # where an older version of the app kept them
         out["Confirmed facts"] = (ref / "user-notes.md").read_text()
     return out
 
@@ -429,7 +430,7 @@ def check_lines(md: str, trace_md: str, match_md: str, passages: list[Passage],
     clause's best entailment score."""
     led = ledger(match_md)
     everywhere = set(figures("\n".join([*(p.text for p in passages), *led.values()])))
-    confirmed = set(figures(" ".join(p.text for p in passages if p.source.startswith("Confirmed facts"))))
+    confirmed = set(figures(" ".join(p.text for p in passages if CONFIRMED.search(p.source))))
     rows = trace_rows(trace_md)
     checks, summary_ids = [], None
     for sec, line in resume_lines(md):

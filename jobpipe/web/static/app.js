@@ -145,7 +145,6 @@ function showTab(name) {
   if (name === "startups") loadStartups();
   if (name === "runs") loadRuns();
   if (name === "dashboard") renderDashboard();
-  if (name === "notes") loadNotes();
   if (name in DOCS) DOCS[name].load();
   if (name === "profile") { loadProfile(); loadAI(); }
 }
@@ -1179,7 +1178,7 @@ function emptyTab(j, d, tab) {
     resume: ["No tailored résumé yet",
       "Tailoring writes a résumé for this posting from your impact record, along with the Fit report and the heat map. It makes a series of Claude calls and takes several minutes; you can follow it in Runs."],
     report: ["No fit report yet",
-      "The fit report comes from tailoring a résumé: the scores, the ATS scorecard, the gaps, and at the end, the follow-up questions to answer. Put your answers in Confirmed facts, then tailor again."],
+      "The fit report comes from tailoring a résumé: the scores, the ATS scorecard, the gaps, and at the end, the follow-up questions to answer. Add your answers as confirmed facts in the Impact record tab, then tailor again."],
     heatmap: ["No heat map yet",
       "The heat map rates every requirement in the posting against your impact record and each résumé. A full score makes one in a few minutes without writing a résumé; tailoring makes one too."],
   }[tab];
@@ -2019,7 +2018,7 @@ function renderRunResults(r) {
   box.replaceChildren(
     h("h3", {}, `Results: ${plural(res.length, "job")}`),
     h("p", { class: "muted" }, tailored
-      ? "Open a tailored job's Fit report: its follow-up questions are at the end. Answer them in Confirmed facts, then tailor again if the answers change what the résumé can claim."
+      ? "Open a tailored job's Fit report: its follow-up questions are at the end. Add your answers as confirmed facts in the Impact record tab, then tailor again if they change what the résumé can claim."
       : "Open a job to see its score, matches and likely gaps beside the posting."),
     h("ul", {}, ...res.map((x) => h("li", {},
       h("span", { class: `fit ${fitClass(x.impact_score ?? x.fit)}` }, x.impact_score ?? x.fit ?? "–"),
@@ -2299,20 +2298,6 @@ suForm.addEventListener("submit", async (e) => {
     selectStartup(s.id);
     toast(s.line ? `${s.name}: ${s.line}` : `Added ${s.name}. Find open roles reads its careers board.`);
   } catch (err) { formError(suForm, err.message); }
-});
-
-// ---- notes ------------------------------------------------------------------------------------------
-async function loadNotes() {
-  try {
-    const d = await api("/api/notes");
-    $("#notes").replaceChildren(h("pre", { class: "posting" }, d.markdown || "No confirmed facts yet."));
-  } catch (e) { toast(e.message, true); }
-}
-$("#add-note").addEventListener("click", async () => {
-  const t = $("#note-text");
-  if (!t.value.trim()) return;
-  try { await post("/api/notes", { text: t.value }); t.value = ""; loadNotes(); toast("Recorded."); }
-  catch (e) { toast(e.message, true); }
 });
 
 // ---- profile -------------------------------------------------------------------------------------
@@ -2773,7 +2758,28 @@ function docEditor({ key, url, onSaved = () => {} }) {
     else if (act === "force") save(true);
   });
 
-  return { load, save, setView, dirty: () => { sync(); return dirty(); },
+  // A change made on the server (a confirmed fact): send unsaved edits first, then post with the version saved.
+  async function amend(path, body) {
+    if (!D.loaded) await load();
+    await save();
+    if (D.conflict) throw new Error("Sort out the changed-elsewhere banner first.");
+    if (D.failed) throw new Error(`Couldn't save your edits first: ${D.failed}`);
+    const res = await request(`${url}${path}`, { method: "POST", body: JSON.stringify({ ...body, version: D.version }) });
+    const d = await res.json();
+    if (res.status === 409) {
+      D.conflict = d.current;
+      el("conflict").classList.remove("hidden");
+      state();
+      throw new Error(d.detail);
+    }
+    if (!res.ok) throw new Error(d.detail || res.statusText);
+    apply(d);
+    const n = headings(d.markdown).findIndex((x) => x.level === 1 && /^confirmed facts$/i.test(x.label));
+    if (n >= 0) requestAnimationFrame(() => jumpTo(headings(d.markdown)[n], n));
+    return d;
+  }
+
+  return { load, save, setView, amend, dirty: () => { sync(); return dirty(); },
            toggleView: () => setView(view() === "formatted" ? "edit" : "formatted") };
 }
 
@@ -2783,6 +2789,29 @@ const DOCS = {
   prep: docEditor({ key: "prep", url: "/api/interview-prep",
                     onSaved: (d) => { Object.assign($("#prep-path"), { textContent: d.path.split("/").slice(-2).join("/"), title: d.path }); } }),
 };
+// Confirmed facts: answers to a fit report's follow-up questions, added to the end of the impact record.
+const factBox = $("#fact-box"), factOpen = $("#fact-open");
+function showFactBox(open) {
+  factBox.classList.toggle("hidden", !open);
+  factOpen.setAttribute("aria-expanded", String(open));
+  if (open) $("#fact-text").focus();
+}
+factOpen.addEventListener("click", () => showFactBox(factBox.classList.contains("hidden")));
+$("#fact-cancel").addEventListener("click", () => showFactBox(false));
+factBox.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const t = $("#fact-text"), btn = $("button[type=submit]", factBox);
+  if (!t.value.trim()) return t.focus();
+  btn.disabled = true;
+  try {
+    await DOCS.impact.amend("/facts", { text: t.value });
+    t.value = "";
+    showFactBox(false);
+    toast("Added to Confirmed facts at the end of the record.");
+  } catch (err) { toast(err.message, true); }
+  finally { btn.disabled = false; }
+});
+
 document.addEventListener("keydown", (e) => {
   if (!(e.metaKey || e.ctrlKey) || !(S.tab in DOCS)) return;
   if (e.key === "s") { e.preventDefault(); DOCS[S.tab].save(); }
