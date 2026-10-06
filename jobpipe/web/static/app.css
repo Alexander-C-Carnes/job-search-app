@@ -715,6 +715,31 @@ dialog::backdrop { background: rgba(10, 12, 16, .36); }
 dialog h2 { font-size: 17px; letter-spacing: -.01em; margin-bottom: 12px; }
 dialog h2 + p { margin: -6px 0 12px; }
 #referral-dialog { width: min(480px, 92vw); }
+/* Adding a résumé: the file as uploaded beside the page as the app reads it, the checks, then name and save. */
+.import-dialog { width: min(1180px, 96vw); max-height: 94vh; overflow: auto; }
+.import-head { margin-bottom: 12px; }
+.import-head h2 { margin-bottom: 2px; }
+.import-head p { margin: 0; }
+.import-reading { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 40px 16px 48px; }
+.import-reading p { margin: 0; }
+.import-blob { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); margin-bottom: 10px; animation: spin 1s linear infinite; }
+.import-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 860px) { .import-cols { grid-template-columns: 1fr; } }
+.import-cols section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.import-cols h3 { font-size: 13px; }
+.import-col-head { display: flex; align-items: center; gap: 6px; min-height: 28px; }
+.import-orig, .import-sheet, .import-md { width: 100%; height: min(58vh, 620px); border: 1px solid var(--line); border-radius: 8px; background: #e6e6e6; }
+.import-text { margin: 0; padding: 12px 14px; overflow: auto; white-space: pre-wrap; font: 12px/1.5 var(--mono); background: var(--panel-2); color: var(--ink); }
+.import-md { background: var(--panel); color: var(--ink); padding: 10px 12px; font: 12.5px/1.55 var(--mono); resize: vertical; }
+.import-flags { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.import-flags li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.import-flags li i { flex: none; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font: 700 11px/1 var(--mono); font-style: normal; background: var(--sel); color: var(--muted); }
+.import-flags li.ok i { background: color-mix(in srgb, var(--good) 18%, var(--panel)); color: var(--good); }
+.import-flags li.warn { border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.import-flags li.warn i { background: color-mix(in srgb, var(--warn) 18%, var(--panel)); color: var(--warn); }
+.import-save { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 14px 0 4px; font-size: 13px; }
+.import-save label:not(.check) { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.import-save input[type=text] { width: 170px; }
 /* how long an action takes, on its button ("Make résumé ~25 min"), and the links to the glossary */
 .btn-time { font-weight: 400; font-size: .86em; opacity: .72; white-space: nowrap; }
 .help-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; white-space: nowrap; }
@@ -839,6 +864,22 @@ dialog h2 + p { margin: -6px 0 12px; }
 .look-swatches i:first-child { margin-left: 0; }
 .look-name { font-weight: 700; font-size: 14px; }
 .look-blurb { font-size: 12px; color: var(--muted); }
+/* Résumé format (Profile): the Look picker's tiles, each with its first page; a note on the Résumé tab when a
+   résumé is drawn in another format than the Profile's. The page thumbnails stay paper-white in every look. */
+.format-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 4px 0 12px; }
+.format-option .format-thumb { display: block; aspect-ratio: 8.5 / 11; background: #fff; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.format-option .format-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.format-option .look-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.format-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+.format-foot .check { flex: 1 1 260px; }
+.format-status { margin: 0 0 12px; font-size: 13px; }
+.format-status:empty { display: none; }
+.format-status p { margin: 0 0 6px; }
+.format-behind { margin: 0; padding-left: 18px; }
+.format-behind .link-btn { padding: 1px 0; text-align: left; }
+.format-note { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; font-size: 13px;
+  border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--star) 14%, var(--panel)); }
+.format-note .grow { min-width: 200px; }
 @media (prefers-reduced-motion: reduce) {
   .moment-banner, .cat-card, .meter .track i { transition: none; }
   .cat .eye, .cat .tail, .cat .body-blob { animation: none; }

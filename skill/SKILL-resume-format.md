@@ -7,6 +7,19 @@ description: "Render {name}'s résumé markdown into his two-page, red-accent r�
 
 Turn a résumé markdown file into a two-page US Letter document with a fixed visual spec. **The content comes only from the markdown**: never rewrite, reorder, add, or drop wording. Keep the text verbatim, apart from typographic quotes (' → ’).
 
+## Formats
+The app has five résumé formats; the candidate picks one on the Profile tab (`candidate.resume_format` in searches.yaml). This file specifies **Signature**, the default and the original layout. The others are CSS over the same markup in `jobpipe/formats.py`, and keep every ATS rule below:
+
+| Format | Font | Accent | Pages | What differs from Signature |
+|---|---|---|---|---|
+| Signature | Helvetica Neue | #E50815 red | 2 | (this spec) |
+| Executive | Georgia | #1F3A5F navy | 2 | Centred caps name, headings centred between hairlines, company bold and role italic |
+| Modern | Arial | #0E7C74 teal | 2 | Large name, teal heading bars, each role's title on its own line |
+| Minimal | Helvetica | none | 2 | Black and greys only, dates under each role, en-dash bullets |
+| Compact | Arial | #1D4ED8 blue | **1** | 0.5 in margins, tighter spacing, CORE SKILLS straight after SUMMARY |
+
+Render any of them with `python -m jobpipe.render resume.md out.pdf --format <signature|executive|modern|minimal|compact>`. In every format, heading letter-spacing stays at .06em or less and ligatures are off, so each heading and word comes out of the PDF as plain text.
+
 ## Page
 - US Letter (8.5 × 11 in), exactly **2 pages**, 0.625 in margins on all sides.
 - **No page numbers, headers, or footers.** ATS parsers skip or garble header/footer text, and page numbers pollute parsed content.

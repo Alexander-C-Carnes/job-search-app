@@ -4,7 +4,7 @@ Layout inside the job's run folder:
   versions/v1.md, v1.pdf      the pipeline's resume-final.md and its PDF
   versions/v2.md, v2.pdf ...  accepted edits
   versions/proposal.md/.pdf   a pending edit, until accepted or discarded
-  versions/history.json       {"current": n, "versions": [...], "proposal": {...} | null}
+  versions/history.json       {"current": n, "format": id, "versions": [...], "proposal": {...} | null}
   versions/chat.json          the conversation: [{"role": "user"|"claude"|"note", "text", "at", "proposal"?}]
 
 Each message to Claude carries the conversation so far. Claude always replies, and writes a revised
@@ -16,6 +16,11 @@ until they accept it.
 The candidate can also edit by hand: on the page (the résumé drawn in the PDF's layout, each line
 click-to-edit; apply_page_edits maps the changed text back onto its markdown lines) or as the
 markdown itself. A hand edit is saved straight away as a new version, re-rendered and checked.
+
+Format: the résumé format its PDFs are drawn in (jobpipe/formats.py). A tailoring run records the candidate's
+default in resume-format.txt; runs from before formats were Signature. Changing the default redraws a résumé
+only when it still fits the new format's page limit (redraw); one that doesn't keeps its format until a trim
+proposal made for the new format is accepted.
 
 Scores: each version carries its ATS total (skills / experience / keywords, the tailoring run's math) and
 résumé score. An edit, Claude's or a hand edit, is re-rated against the requirement rows in
@@ -34,7 +39,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .. import config, render
+from .. import config, formats, render
 from ..config import Config
 from ..llm import AgentCall, Runner, brief
 from ..tailor import VALUE, exact_title, normalize_keywords, run_script, scorecard
@@ -55,7 +60,7 @@ Rules for everything you change on your own (his instruction overrides them):
 1. Every claim you add must trace to the impact record, user-confirmed notes, or the evidence ledger in 04-match.md, at exactly the scope the source states ("contributed to" stays "contributed to"). Follow the Do-not-claim list.
 2. The headline starts with the posting's exact title, level included, whether or not he held it. Anywhere else, don't add a level or title he hasn't held.
 3. Keep the exact markdown shape of the writer brief (headings, job lines, italic date lines, CORE SKILLS with Hard Skills / Soft Skills lines, plain characters only).
-4. Keep it to two pages: about 1,000 words at most.
+4. Keep to the length limit at the end of this brief.
 5. Change only what he asks for. Keep the posting's own wording where the evidence supports it.
 """
 CHAT_TURNS = 24     # earlier messages sent with each new one
@@ -104,22 +109,39 @@ class ResumeWorkspace:
     def _save(self, h: dict) -> None:
         self.history_path.write_text(json.dumps(h, indent=2))
 
+    def _drawn_in(self) -> str:
+        """The format the tailoring run drew this résumé in (Signature before there were formats)."""
+        f = self.run_dir / "resume-format.txt"
+        return formats.get(f.read_text().strip() if f.exists() else None).id
+
+    def format_id(self) -> str:
+        """The format its PDFs are drawn in, read without setting up the versions (which renders v1)."""
+        if self.history_path.exists():
+            return json.loads(self.history_path.read_text()).get("format") or self._drawn_in()
+        return self._drawn_in()
+
+    @property
+    def format(self) -> formats.Format:
+        self.history()
+        return formats.get(self.format_id())
+
     def _init(self) -> None:
         src = self.run_dir / "resume-final.md"
         if not src.exists():
             raise EditError(f"No resume-final.md in {self.run_dir}")
         self.vdir.mkdir(parents=True, exist_ok=True)
         shutil.copy(src, self.vdir / "v1.md")
+        fid = self._drawn_in()
         if self.exported_pdf and self.exported_pdf.exists():
             shutil.copy(self.exported_pdf, self.vdir / "v1.pdf")
         else:
-            render.render_pdf(src.read_text(), self.vdir / "v1.pdf")
-        check = self.check(self.vdir / "v1.md")
+            render.render_pdf(src.read_text(), self.vdir / "v1.pdf", fmt=fid)
+        check = self.check(self.vdir / "v1.md", formats.get(fid))
         md = (self.vdir / "v1.md").read_text()
         pdf_txt = self.run_dir / "resume-final.pdf.txt"     # the text the tailoring run's ATS total was measured on
         rows = self.requirements()
-        self._save({"current": 1, "proposal": None, "versions": [{
-            "n": 1, "created": _now(), "source": "pipeline", "instruction": "", "changes": "",
+        self._save({"current": 1, "format": fid, "proposal": None, "versions": [{
+            "n": 1, "created": _now(), "source": "pipeline", "instruction": "", "changes": "", "format": fid,
             "keywords_pct": self.keyword_pct(md), "check": check,
             **(self.scores(rows["ratings"], rows["score"], pdf_txt.read_text() if pdf_txt.exists() else md)
                if rows else {})}]})
@@ -270,11 +292,12 @@ class ResumeWorkspace:
             lines += [f"- [{r['weight']}] {r['requirement']}: {x}" for r, x in zip(rows[sec], ratings[sec])]
         return "\n".join(lines) + "\n"
 
-    def check(self, md_path: Path) -> dict:
+    def check(self, md_path: Path, fmt: Optional[formats.Format] = None) -> dict:
         title = self.title()
         if not title:
             return {"passed": None, "output": "No exact title found; check skipped."}
-        code, out = run_script("check_resume.py", str(md_path), "--title", title, cwd=self.run_dir)
+        code, out = run_script("check_resume.py", str(md_path), "--title", title, cwd=self.run_dir,
+                               max_pages=(fmt or self.format).max_pages)
         return {"passed": code == 0, "output": out}
 
     def editable(self) -> bool:
@@ -282,9 +305,10 @@ class ResumeWorkspace:
         return (self.run_dir / "jd.md").exists() and (self.run_dir / "04-match.md").exists()
 
     # ---- edit loop ---------------------------------------------------------------
-    async def propose(self, instruction: str, runner: Runner, cfg: Config) -> dict:
+    async def propose(self, instruction: str, runner: Runner, cfg: Config, fmt: Optional[str] = None) -> dict:
         """Send one chat message. Returns {"reply": str, "proposal": {...} | None}; a proposal only
-        when Claude revised the résumé, which replaces any pending one."""
+        when Claude revised the résumé, which replaces any pending one. With `fmt` (the trim for a new
+        default format), the proposal is drawn in and held to that format, and accepting it switches to it."""
         if not self.editable():
             raise EditError("This résumé was saved without its posting and match brief, so Claude can't edit it "
                             "here. Tailor the job in the app to get an editable copy.")
@@ -295,6 +319,7 @@ class ResumeWorkspace:
             raise EditError("Type a message first.")
         current = self.md(h["current"])
         cand = config.candidate()
+        target = formats.get(fmt) if fmt else self.format
         docs = {"jd.md": (self.run_dir / "jd.md").read_text(),
                 "04-match.md": (self.run_dir / "04-match.md").read_text(),
                 f"resume-current.md (v{h['current']})": current,
@@ -310,18 +335,19 @@ class ResumeWorkspace:
         tail = (f"The conversation so far:\n{convo}\n\n"
                 f"{cand.first_name}'s new message:\n{instruction}"
                 + (f"\n\nThe posting's exact job title: {self.title()}" if self.title() else ""))
-        call = AgentCall(label="resume-edit", model=cfg.writer_model, instructions=cand.personalize(EDIT_BRIEF),
+        call = AgentCall(label="resume-edit", model=cfg.writer_model,
+                         instructions=cand.personalize(EDIT_BRIEF) + "\n" + formats.length_rules(target),
                          documents=docs, expect=["reply.md"], tail=tail)
         # The message is kept before Claude answers, so a page reloaded meanwhile still shows it.
         self._say("user", instruction)
         try:
-            return await self._answer(instruction, runner, cfg, call, h, current, pending)
+            return await self._answer(instruction, runner, cfg, call, h, current, pending, target)
         except BaseException:       # a failure, or the request cancelled: the message isn't left unanswered
             self._say("note", "Claude couldn't answer that message. Send it again to retry.")
             raise
 
     async def _answer(self, instruction: str, runner: Runner, cfg: Config, call: AgentCall,
-                      h: dict, current: str, pending: str) -> dict:
+                      h: dict, current: str, pending: str, target: formats.Format) -> dict:
         res = await runner.run(call)
         reply = res.files["reply.md"].strip()
         new_md = res.files.get("resume-edited.md", "")
@@ -335,14 +361,14 @@ class ResumeWorkspace:
         async def rate() -> Optional[dict]:
             return await self.rerate(new_md, pending or current, prior, runner, cfg) if prior else None
         (pages, pdf_text), check, rated = await asyncio.gather(
-            asyncio.to_thread(render.render_pdf, new_md, self.vdir / "proposal.pdf"),
-            asyncio.to_thread(self.check, prop_md), rate())
+            asyncio.to_thread(render.render_pdf, new_md, self.vdir / "proposal.pdf", None, target),
+            asyncio.to_thread(self.check, prop_md, target), rate())
         scores = {}
         if prior:
             r = rated or prior
             scores = self.scores(r["ratings"], r["score"], pdf_text or new_md, rerated=rated is not None)
         proposal = {"created": _now(), "instruction": instruction, "changes": reply,
-                    "pages": pages, "check": check,
+                    "pages": pages, "check": check, "format": target.id,
                     "keywords_pct": self.keyword_pct(new_md), "base": h["current"], **scores}
         h["proposal"] = proposal
         self._save(h)
@@ -359,10 +385,11 @@ class ResumeWorkspace:
         n = max(v["n"] for v in h["versions"]) + 1
         (self.vdir / "proposal.md").rename(self.vdir / f"v{n}.md")
         (self.vdir / "proposal.pdf").rename(self.vdir / f"v{n}.pdf")
+        fid = p.get("format") or h.get("format") or self._drawn_in()
         h["versions"].append({"n": n, "created": _now(), "source": "edit", "instruction": p["instruction"],
                               "changes": p["changes"], "keywords_pct": p["keywords_pct"], "check": p["check"],
-                              **{k: p[k] for k in SCORE_KEYS if k in p}})
-        h["current"], h["proposal"] = n, None
+                              "format": fid, **{k: p[k] for k in SCORE_KEYS if k in p}})
+        h["current"], h["proposal"], h["format"] = n, None, fid
         self._save(h)
         self._export(n)
         self._say("note", f"Accepted the proposed edit as v{n}.")
@@ -391,10 +418,13 @@ class ResumeWorkspace:
             raise EditError(f"No version {n}")
         new = max(v["n"] for v in h["versions"]) + 1
         shutil.copy(self.vdir / f"v{n}.md", self.vdir / f"v{new}.md")
-        shutil.copy(self.vdir / f"v{n}.pdf", self.vdir / f"v{new}.pdf")
         old = next(v for v in h["versions"] if v["n"] == n)
+        if old.get("format") == h.get("format"):
+            shutil.copy(self.vdir / f"v{n}.pdf", self.vdir / f"v{new}.pdf")
+        else:                       # drawn in another format: redraw it in the résumé's current one
+            render.render_pdf(self.md(n), self.vdir / f"v{new}.pdf", fmt=self.format)
         h["versions"].append({**old, "n": new, "created": _now(), "source": f"restored v{n}",
-                              "instruction": "", "changes": f"Restored version {n}."})
+                              "instruction": "", "changes": f"Restored version {n}.", "format": h.get("format")})
         h["current"] = new
         self._save(h)
         self._export(new)
@@ -429,7 +459,8 @@ class ResumeWorkspace:
         n = max(v["n"] for v in h["versions"]) + 1
         md = md.rstrip("\n") + "\n"
         (self.vdir / f"v{n}.md").write_text(md)
-        pages, pdf_text = render.render_pdf(md, self.vdir / f"v{n}.pdf")
+        fmt = self.format
+        pages, pdf_text = render.render_pdf(md, self.vdir / f"v{n}.pdf", fmt=fmt)
         (self.vdir / f"v{n}.pdf.txt").write_text(pdf_text or md)     # what rescore() measures keywords on
         for f in ("proposal.md", "proposal.pdf"):    # a pending proposal was built on the old version
             (self.vdir / f).unlink(missing_ok=True)
@@ -439,7 +470,7 @@ class ResumeWorkspace:
                   "rating": True} if prior else {}
         h["versions"].append({"n": n, "created": _now(), "source": "by hand", "instruction": "", "changes": changes,
                               "keywords_pct": self.keyword_pct(md), "check": self.check(self.vdir / f"v{n}.md"),
-                              "pages": pages, "base": base, **scores})
+                              "pages": pages, "base": base, "format": fmt.id, **scores})
         dropped = bool(h.get("proposal"))
         h["current"], h["proposal"] = n, None
         self._save(h)
@@ -465,6 +496,38 @@ class ResumeWorkspace:
         v["rating"] = False
         self._save(h)
         return v
+
+    # ---- formats -----------------------------------------------------------------------
+    def redraw(self, fmt: formats.Format, printer: Optional[render.Printer] = None) -> dict:
+        """Draw the current version in `fmt` when it fits the format's page limit: {"applied", "pages"}.
+        One that doesn't fit keeps its format; trim_instruction() is the chat message that fits it."""
+        h = self.history()
+        if h.get("format") == fmt.id and (self.vdir / f"v{h['current']}.pdf").exists():
+            return {"applied": True, "pages": None, "format": fmt.id}
+        n = h["current"]
+        tmp = self.vdir / "redraw.pdf"
+        pages, text = (printer.pdf if printer else render.render_pdf)(self.md(n), tmp, fmt=fmt)
+        if pages > fmt.max_pages:
+            tmp.unlink(missing_ok=True)
+            return {"applied": False, "pages": pages, "format": h.get("format") or self._drawn_in()}
+        tmp.replace(self.vdir / f"v{n}.pdf")
+        (self.vdir / f"v{n}.pdf.txt").write_text(text)
+        for v in h["versions"]:
+            if v["n"] == n:
+                v.update(format=fmt.id, pages=pages)
+        h["format"] = fmt.id
+        self._save(h)
+        self._export(n)
+        return {"applied": True, "pages": pages, "format": fmt.id}
+
+    @staticmethod
+    def trim_instruction(fmt: formats.Format, pages: int) -> str:
+        """The chat message that trims a résumé to a format's page limit (deleting only, like Make résumé's trim)."""
+        return (f"Trim this résumé to fit {fmt.pages_word} in the {fmt.name} format; it runs to {pages} pages there. "
+                "Delete only: first whole bullets that prove Low-weight requirements, then Med ones, then any bullet "
+                "that repeats another's proof, keeping every bullet that is the only proof of a High-weight "
+                "requirement (04-match.md has the weights). Then shorten long bullets to two lines at most. "
+                "Don't add or reword anything.")
 
     def _export(self, n: int) -> None:
         """Keep resume-final.md and the deliverable PDF equal to the current version."""

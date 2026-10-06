@@ -120,7 +120,7 @@ Combine the three drafts into one `resume-final.md`, in the same markdown shape 
 3. **Bullets.** For each role, group the three drafts' bullets by requirement ID (from the traces). For each requirement keep one bullet, choosing by, in order: (a) traces to ledger items at the allowed scope; (b) uses the most High-weight posting phrases verbatim; (c) carries a real figure; (d) reads as a natural mini-STAR. You may splice the posting phrase from one draft onto the evidence from another only if the result still matches the ledger exactly. Never introduce a claim, figure, or tool that none of the drafts traced.
 4. **Coverage.** Every met High-weight must-have appears at least once in a bullet in the posting's words. Order bullets within a role by weight.
 5. **CORE SKILLS** from `04-match.md`'s ranked lists, adjusted only if a writer showed an item was unsupported.
-6. **Length.** Cut Low-weight and unrelated lines until it fits two pages (roughly 1,000 words at most).
+6. **Length.** Cut Low-weight and unrelated lines until it fits the résumé format's page limit: two pages (roughly 1,000 words at most), or one page (roughly 600 words) in the Compact format.
 7. **Verify.** Run `check_resume.py` with the merged trace (write `trace-final.md` listing each line's source draft and ledger IDs) and `ats_score.py`. The merged resume's Total % must be at least the best draft's; if it's lower, find the keywords the merge dropped and restore them where the evidence allows. Check the "Honesty guardrails" in `references/resume-rules.md` line by line.
 
 Also write `merge-notes.md`: which draft each line came from, and every posting phrase held back and why. These feed the report.
@@ -133,7 +133,7 @@ Read the resume-format skill's SKILL.md and follow it to render `resume-final.md
 - File name: `{pdf_prefix}-[Company]-[Role].pdf` in the outputs folder.
 - To make the PDF, use headless Chromium via Playwright if available, otherwise `wkhtmltopdf`.
 
-After rendering: confirm exactly two pages and run `pdftotext -layout` on the PDF, then `check_resume.py`-style spot checks on the text (exact title present, headings in order, no stray dashes) and `ats_score.py` with the PDF text as the resume. Report the final Total %.
+After rendering: confirm the page count (two pages; one in the Compact format) and run `pdftotext -layout` on the PDF, then `check_resume.py`-style spot checks on the text (exact title present, headings in order, no stray dashes) and `ats_score.py` with the PDF text as the resume. Report the final Total %.
 
 ## Stage 6: Report (orchestrator)
 

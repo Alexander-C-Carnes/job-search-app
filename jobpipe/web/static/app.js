@@ -147,7 +147,7 @@ function showTab(name) {
   if (name === "runs") loadRuns();
   if (name === "dashboard") renderDashboard();
   if (name in DOCS) DOCS[name].load();
-  if (name === "profile") { loadProfile(); loadAI(); }
+  if (name === "profile") { loadProfile(); loadAI(); loadFormats(); }
 }
 
 // ---- what each action is called ----------------------------------------------------------------
@@ -1611,6 +1611,31 @@ async function reloadResume(id) {
   await loadJobs();         // the job's scores first (they follow the current version), then the panel showing them
   loadDetail(id);
 }
+// A résumé drawn in another format than the Profile's: redraw it in the default, or, when it would go over that
+// format's page limit, ask Claude to trim it to fit (a proposal you accept, like any edit).
+function formatNote(d, r, trim) {
+  const f = r.format, def = r.default_format;
+  if (!f || !def || f.id === def.id) return null;
+  const id = encodeURIComponent(d.id);
+  const box = h("div", { class: "format-note", role: "status" });
+  const use = h("button", { class: "primary small" }, `Use ${def.name}`);
+  const later = h("button", { class: "ghost small" }, `Keep ${f.name}`);
+  later.addEventListener("click", () => box.remove());
+  use.addEventListener("click", async () => {
+    use.disabled = true;
+    use.replaceChildren(spinner(), ` Redrawing…`);
+    try {
+      const res = await post(`/api/jobs/${id}/resume/format`);
+      if (res.applied) { toast(`Redrawn in ${def.name}.`); reloadResume(d.id); return; }
+      const go = h("button", { class: "primary small" }, `Trim to ${def.pages_word}`);
+      go.addEventListener("click", () => { box.remove(); trim(res.trim, res.trim_format); });
+      box.replaceChildren(h("span", { class: "grow" }, `In ${def.name} this résumé runs to ${res.pages} pages, over its ${def.pages_word}. `,
+        "Claude can trim it to fit, deleting only; you see the change before it's saved."), go, later);
+    } catch (e) { toast(e.message, true); use.disabled = false; use.textContent = `Use ${def.name}`; }
+  });
+  box.append(h("span", { class: "grow" }, `Drawn in ${f.name}. Your résumé format is ${def.name}.`), use, later);
+  return box;
+}
 function renderResume(d, panel) {
   const r = d.resume;
   const id = encodeURIComponent(d.id);
@@ -1620,7 +1645,8 @@ function renderResume(d, panel) {
   versionSel.addEventListener("change", () => { frame.src = fileUrl(`/api/jobs/${id}/resume/${versionSel.value}.pdf`); });
   const pdfLink = h("a", { href: fileUrl(`/api/jobs/${id}/resume/${r.current}.pdf`), target: "_blank" }, "Open PDF ↗");
   const editBtn = h("button", { class: "ghost small", title: "Change the wording yourself, right on the page" }, "Edit on page");
-  const pdfpane = h("div", { class: "pdfpane" }, h("div", { class: "pdfbar" }, "Version", versionSel, pdfLink, h("span", { class: "grow" }), editBtn), frame);
+  const fmtNote = formatNote(d, r, (text, fmt) => { instr.value = chat.draft = text; send(fmt); });
+  const pdfpane = h("div", { class: "pdfpane" }, h("div", { class: "pdfbar" }, "Version", versionSel, pdfLink, h("span", { class: "grow" }), editBtn), fmtNote, frame);
   editBtn.addEventListener("click", () => openPageEditor(d, pdfpane));
 
   const editpane = h("div", { class: "editpane" });
@@ -1687,7 +1713,7 @@ function renderResume(d, panel) {
     instr.focus({ preventScroll: true });
   };
   chat.view = { paint, showProposal, refocus, isOn: () => thread.isConnected };
-  async function send() {
+  async function send(format) {      // format: the trim for a new default format is held to it
     const text = instr.value.trim();
     if (!text || chat.busy) { instr.focus(); return; }
     chat.busy = chat.sending = true;
@@ -1695,7 +1721,7 @@ function renderResume(d, panel) {
     chat.msgs = [...chat.msgs, { role: "user", text }];
     chat.view.paint();
     try {
-      const res = await post(`/api/jobs/${id}/edit`, { instruction: text });
+      const res = await post(`/api/jobs/${id}/edit`, { instruction: text, ...(typeof format === "string" ? { format } : {}) });
       chat.msgs = res.chat;
       chat.busy = chat.sending = false;
       if (res.proposal) {
@@ -1712,7 +1738,7 @@ function renderResume(d, panel) {
     }
     if (chat.view.isOn()) { chat.view.paint(); chat.view.refocus(); }
   }
-  askBtn.addEventListener("click", send);
+  askBtn.addEventListener("click", () => send());
   instr.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
   });
@@ -1788,13 +1814,13 @@ async function openPageEditor(d, pane) {
     status.textContent = mode === "text" ? (n ? "Unsaved changes" : "The résumé's markdown. Keep its shape: # Name, **headline**, contact line, ## sections.")
       : n ? `${n} change${n > 1 ? "s" : ""} not saved` : "Click any line to change it. Enter or Esc finishes a line.";
   };
-  // Where the PDF's page breaks fall, roughly: the page is 11in with 0.625in margins.
+  // Where the PDF's page breaks fall, roughly: the page is 11in with the format's margins.
   let guideTimer;
   const guides = () => {
     const doc = page.contentDocument;
     if (!doc?.body) return;
     doc.querySelectorAll(".page-guide").forEach((g) => g.remove());
-    const top = 0.625 * PAGE_PX, per = (11 - 1.25) * PAGE_PX;
+    const m = pg.margin_in ?? 0.625, top = m * PAGE_PX, per = (11 - 2 * m) * PAGE_PX;
     const content = doc.body.scrollHeight - 2 * top;
     let k = 1;
     for (; k * per < content; k++) {
@@ -1805,7 +1831,7 @@ async function openPageEditor(d, pane) {
       doc.body.append(g);
     }
     pages.textContent = `≈ ${k} page${k > 1 ? "s" : ""}`;
-    pages.classList.toggle("fail", k > 2);
+    pages.classList.toggle("fail", k > (pg.max_pages ?? 2));
   };
   page.addEventListener("load", () => {
     const doc = page.contentDocument;
@@ -2689,24 +2715,99 @@ async function saveProfile() {
   } catch (e) { formError(pForm, e.message); btn.disabled = false; }
 }
 $("#resume-add").addEventListener("click", () => $("#resume-upload").click());
-$("#resume-upload").addEventListener("change", async (e) => {
+$("#resume-upload").addEventListener("change", (e) => {
   const file = e.target.files[0];
   e.target.value = "";
-  if (!file) return;
-  const body = { filename: file.name, markdown: await file.text() };
-  let d;
-  try { d = await post("/api/profile/resumes", body); }
-  catch (err) {
-    if (!/already exists/.test(err.message) || !confirm(`${err.message} Replace it with ${file.name}?`)) { if (!/already exists/.test(err.message)) toast(err.message, true); return; }
-    try { d = await post("/api/profile/resumes", { ...body, replace: true }); } catch (err2) { toast(err2.message, true); return; }
-  }
-  P.data.files = d.files;              // keep unsaved edits; tick the new résumé
-  let row = P.rows.find((r) => r.file === d.file);
-  if (!row) P.rows.push(row = { file: d.file, name: "" });
-  Object.assign(row, { ticked: true, missing: false, name: row.name || fileLabel(d.file) });
-  renderResumeRows(); profileChanged();
-  toast(`Added ${d.file}. Save the profile to start scoring against it.`);
+  if (file) importResume(file);
 });
+
+// ---- uploading a résumé: the file is read and sorted into the app's markdown (Claude, about a minute), then
+// checked word by word against the file. You see both side by side, fix anything flagged, name it and save.
+const impDialog = $("#import-dialog");
+async function importResume(file) {
+  const body = $("#import-body");
+  $("#import-title").textContent = "Add a résumé";
+  $("#import-sub").textContent = file.name;
+  body.replaceChildren(h("div", { class: "import-reading" }, h("span", { class: "import-blob", "aria-hidden": "true" }),
+    h("p", {}, h("b", {}, "Reading your résumé…")),
+    h("p", { class: "muted" }, "Claude is sorting it into sections, word for word. This takes about a minute.")));
+  impDialog.showModal();
+  let d;
+  try {
+    d = await api("/api/profile/resumes/import", { method: "POST", body: file,
+      headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": encodeURIComponent(file.name) } });
+  } catch (err) {
+    body.replaceChildren(h("p", { class: "form-error" }, err.message),
+      h("div", { class: "actions" }, h("span", { class: "grow" }), h("button", { class: "ghost", onclick: () => impDialog.close() }, "Close")));
+    return;
+  }
+  if (impDialog.open) renderImport(d);
+}
+function renderImport(d) {
+  const body = $("#import-body");
+  $("#import-title").textContent = "Check what the app read";
+  $("#import-sub").textContent = `${d.filename} · ${d.words.toLocaleString()} words in your file, ${d.kept}% kept`;
+  const orig = d.has_original
+    ? h("iframe", { class: "import-orig", src: fileUrl(`/api/profile/resumes/import/${d.id}/original.pdf`) + "#view=FitH", title: "Your file" })
+    : h("pre", { class: "import-orig import-text" }, d.source);
+  const sheet = h("iframe", { class: "import-sheet", title: "Your résumé as the app reads it", srcdoc: d.html || "" });
+  sheet.addEventListener("load", () => {
+    const root = sheet.contentDocument?.documentElement;
+    if (root) root.style.zoom = Math.min(1, (sheet.clientWidth - 24) / (8.5 * PAGE_PX + 48)).toFixed(3);
+  });
+  const md = h("textarea", { class: "md-editor import-md", spellcheck: "true", hidden: true, "aria-label": "Résumé markdown" });
+  md.value = d.markdown;
+  const toggle = h("button", { type: "button", class: "ghost small" }, "Edit the markdown");
+  const recheck = h("button", { type: "button", class: "ghost small", hidden: true }, "Check again");
+  toggle.addEventListener("click", () => {
+    const editing = md.hidden;
+    md.hidden = !editing; sheet.hidden = editing; recheck.hidden = !editing;
+    toggle.textContent = editing ? "Show the page" : "Edit the markdown";
+    if (!editing) recheck.click();
+  });
+  recheck.addEventListener("click", async () => {
+    if (md.value === d.markdown) return;
+    try { const nd = await post(`/api/profile/resumes/import/${d.id}/check`, { markdown: md.value }); renderImport({ ...nd, _editing: !md.hidden }); }
+    catch (err) { toast(err.message, true); }
+  });
+  const flags = h("ul", { class: "import-flags" }, ...d.flags.map((f) =>
+    h("li", { class: f.level }, h("i", { "aria-hidden": "true" }, f.level === "ok" ? "✓" : f.level === "warn" ? "!" : "i"), h("span", {}, f.text))));
+  const name = h("input", { type: "text", value: fileLabel(`resume-${d.name}.md`), "aria-label": "Name for this résumé" });
+  const fname = h("input", { type: "text", value: d.name, "aria-label": "File name" });
+  const score = h("input", { type: "checkbox", checked: true });
+  const save = h("button", { class: "primary", disabled: !d.html }, "Save résumé");
+  const err = h("p", { class: "form-error hidden" });
+  body.replaceChildren(
+    h("div", { class: "import-cols" },
+      h("section", {}, h("h3", {}, "What you uploaded"), orig),
+      h("section", {}, h("div", { class: "import-col-head" }, h("h3", {}, "What the app read"), h("span", { class: "grow" }), recheck, toggle),
+        sheet, md, flags)),
+    h("div", { class: "import-save" },
+      h("label", {}, "Name ", name), h("label", {}, "File ", h("code", {}, "references/resume-"), fname, h("code", {}, ".md")),
+      h("label", { class: "check" }, score, "Score jobs against it")),
+    err,
+    h("div", { class: "actions" }, h("button", { class: "ghost", onclick: () => impDialog.close() }, "Cancel"), h("span", { class: "grow" }), save));
+  if (d._editing) toggle.click();
+  save.addEventListener("click", async () => {
+    if (!md.hidden && md.value !== d.markdown) { recheck.click(); return; }
+    const payload = { markdown: md.value, filename: `${fname.value.trim() || d.name}.md`, import_id: d.id };
+    let res;
+    save.disabled = true;
+    try { res = await post("/api/profile/resumes", payload); }
+    catch (e1) {
+      if (!/already exists/.test(e1.message) || !confirm(`${e1.message} Replace it?`)) { formError(body, e1.message); save.disabled = false; return; }
+      try { res = await post("/api/profile/resumes", { ...payload, replace: true }); }
+      catch (e2) { formError(body, e2.message); save.disabled = false; return; }
+    }
+    impDialog.close();
+    P.data.files = res.files;              // keep unsaved profile edits; tick the new résumé if asked
+    let row = P.rows.find((r) => r.file === res.file);
+    if (!row) P.rows.push(row = { file: res.file, name: "" });
+    Object.assign(row, { ticked: score.checked, missing: false, name: name.value.trim() || row.name || fileLabel(res.file) });
+    renderResumeRows(); profileChanged();
+    toast(score.checked ? `Added ${res.file}. Save the profile to start scoring against it.` : `Added ${res.file}.`);
+  });
+}
 
 $("#profile-impact-link").addEventListener("click", () => showTab("impact"));
 document.addEventListener("keydown", (e) => {

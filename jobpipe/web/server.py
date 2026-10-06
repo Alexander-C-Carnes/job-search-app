@@ -14,6 +14,8 @@ import json
 import os
 import re
 import secrets
+import shutil
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -28,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import config
 from ..config import Config
-from .. import jd, render
+from .. import formats, jd, render, resume_import
 from ..jd import MIN_PASTED_CHARS, build_jd, normalize_posting_url, posting_url
 from ..config import ModelCfg
 from ..llm import BACKEND_LABELS, CLAUDE_MODELS, PROVIDERS, AgentError, OpenAICompatRunner, Runner
@@ -297,10 +299,21 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         match = linked.best_match(row["title"], row["company"], srcs)
         return match, bool(match), srcs
 
+    def default_format() -> formats.Format:
+        """The Profile's résumé format (searches.yaml `candidate.resume_format`)."""
+        try:
+            return formats.get((searches_file.load_candidate(searches_path) or {}).get("resume_format"))
+        except (OSError, ValueError):
+            return formats.get(None)
+
     def resume_payload(ws: ResumeWorkspace, jid: str) -> dict:
         h = ws.history()
+        fmt, default = ws.format, default_format()
         return {"current": h["current"], "versions": h["versions"], "proposal": bool(h.get("proposal")),
-                "title": ws.title(), "editable": ws.editable(), "chat": chat_payload(ws), "chat_busy": chat_busy(jid)}
+                "title": ws.title(), "editable": ws.editable(), "chat": chat_payload(ws), "chat_busy": chat_busy(jid),
+                "format": {"id": fmt.id, "name": fmt.name, "max_pages": fmt.max_pages},
+                "default_format": {"id": default.id, "name": default.name, "max_pages": default.max_pages,
+                                   "pages_word": default.pages_word}}
 
     def chat_busy(jid: str) -> bool:
         """Claude is answering a chat message about this job's résumé."""
@@ -799,9 +812,9 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         """The current version drawn in the PDF's layout, every line click-to-edit, plus its markdown."""
         ws = workspace(jid)
         h = ws.history()
-        md = ws.md(h["current"])
-        return {"n": h["current"], "html": render.render(md, editable=True), "markdown": md,
-                "proposal": bool(h.get("proposal"))}
+        md, fmt = ws.md(h["current"]), ws.format
+        return {"n": h["current"], "html": render.render(md, editable=True, fmt=fmt), "markdown": md,
+                "proposal": bool(h.get("proposal")), "margin_in": fmt.margin_in, "max_pages": fmt.max_pages}
 
     @app.post("/api/jobs/{jid}/resume/page")
     def save_resume_page(jid: str, body: dict):
@@ -855,7 +868,10 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         async with lock:
             state["chatting"].add(jid)
             try:
-                r = await ws.propose(body.get("instruction", ""), get_runner(), cfg)
+                fid = str(body.get("format") or "")
+                if fid and not formats.known(fid):
+                    raise EditError(f"Unknown résumé format: {fid}")
+                r = await ws.propose(body.get("instruction", ""), get_runner(), cfg, fmt=fid or None)
                 p = r["proposal"]
                 return {"reply_html": md_html(r["reply"]), "chat": chat_payload(ws),
                         "proposal": p and {**p, "changes_html": md_html(p["changes"])}}
@@ -1390,7 +1406,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
 
     @app.post("/api/profile/resumes")
     def add_resume(body: dict):
-        """Save an uploaded résumé (markdown) in the profile's references/ as resume-<name>.md."""
+        """Save a résumé (markdown) in the profile's references/ as resume-<name>.md. With `import_id`, from the
+        upload review: the uploaded original is kept beside it in references/originals/."""
         text, fname = str(body.get("markdown") or ""), Path(str(body.get("filename") or ""))
         if fname.suffix.lower() not in (".md", ".markdown") or not text.strip():
             raise HTTPException(400, "Choose a markdown (.md) résumé file.")
@@ -1400,9 +1417,213 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         path = references() / f"resume-{stem}.md"
         if path.exists() and not body.get("replace"):
             raise HTTPException(409, f"{path.name} already exists.")
+        imp = import_dir(str(body["import_id"])) if body.get("import_id") else None
         path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+        if imp:
+            original = next(imp.glob("original.*"), None)
+            if original:
+                keep = references() / "originals" / f"{path.stem}{original.suffix}"
+                keep.parent.mkdir(exist_ok=True)
+                shutil.copy(original, keep)
+            shutil.rmtree(imp, ignore_errors=True)
         state["runner"] = None
         return {**get_profile(), "file": path.name}
+
+    # ---- uploading a résumé: any file in, the app's markdown out, checked word by word (resume_import.py) ----
+    # An upload waits in data/imports/<id>/ (the original, its text, the sort) until it's saved or a day passes.
+    IMPORT_KEEP_S = 24 * 3600
+
+    def import_dir(iid: str) -> Path:
+        if not re.fullmatch(r"[0-9a-f]{16}", iid):
+            raise HTTPException(404, "That upload has expired. Add the file again.")
+        d = store.root / "imports" / iid
+        if not (d / "meta.json").exists():
+            raise HTTPException(404, "That upload has expired. Add the file again.")
+        return d
+
+    def import_payload(d: Path, md: str) -> dict:
+        meta = json.loads((d / "meta.json").read_text())
+        check = resume_import.verify((d / "source.txt").read_text(), md, tuple(meta["notes"]),
+                                     tuple(meta.get("ai_notes") or ()), meta.get("heuristic"))
+        try:
+            html = render.render(md, fmt=default_format()).replace("</style>", render.SHEET_CSS + "</style>")
+        except Exception:  # noqa: BLE001 - not drawable yet; the flags say why
+            html = None
+        stem = re.sub(r"^resume[-_ ]*|[-_ ]*resume$", "", Path(meta["filename"]).stem, flags=re.I)
+        return {"id": d.name, "filename": meta["filename"], "kind": meta["kind"], "markdown": md, "html": html,
+                "source": (d / "source.txt").read_text(), "has_original": (d / "original.pdf").exists(),
+                "name": slug(stem, max_len=40) or "uploaded", **check}
+
+    @app.post("/api/profile/resumes/import")
+    async def import_resume(request: Request):
+        """Read an uploaded résumé (raw bytes, its name in X-Filename) and sort it into the markdown shape.
+        Saves nothing: the review screen saves it with POST /api/profile/resumes and the import's id."""
+        fname = Path(unquote(request.headers.get("x-filename") or "")).name
+        data = await request.body()
+        try:
+            src = resume_import.read(fname, data)
+        except resume_import.UploadError as e:
+            raise HTTPException(400, str(e)) from None
+        root = store.root / "imports"
+        for old in root.glob("*") if root.exists() else []:
+            if time.time() - old.stat().st_mtime > IMPORT_KEEP_S:
+                shutil.rmtree(old, ignore_errors=True)
+        d = root / secrets.token_hex(8)
+        d.mkdir(parents=True)
+        (d / f"original{src.ext}").write_bytes(data)
+        (d / "source.txt").write_text(src.text, encoding="utf-8")
+        meta = {"filename": fname, "kind": src.kind, "notes": src.notes, "ai_notes": [], "heuristic": None}
+        if resume_import.looks_shaped(src.text):
+            md = src.text                       # already the app's markdown: nothing to sort
+        else:
+            try:
+                md, meta["ai_notes"] = await resume_import.shape(src, get_runner(), cfg.analysis_model)
+            except Exception as e:  # noqa: BLE001 - no AI, or it failed: a rougher sort to check by hand
+                md, meta["heuristic"] = resume_import.heuristic(src.text), str(e).splitlines()[0][:160] or "no reply"
+        (d / "meta.json").write_text(json.dumps(meta))
+        (d / "sorted.md").write_text(md, encoding="utf-8")
+        return import_payload(d, md)
+
+    @app.post("/api/profile/resumes/import/{iid}/check")
+    def check_import(iid: str, body: dict):
+        """The review screen's markdown, edited: drawn and checked again against the file (no AI)."""
+        md = str(body.get("markdown") or "")
+        if len(md) > 300_000:
+            raise HTTPException(400, "That's too long for a résumé.")
+        return import_payload(import_dir(iid), md)
+
+    @app.get("/api/profile/resumes/import/{iid}/original.pdf")
+    def import_original(iid: str, request: Request):
+        path = import_dir(iid) / "original.pdf"
+        if not path.exists():
+            raise HTTPException(404, "Only a PDF upload is shown as it was.")
+        return cached_file(request, path, "application/pdf")
+
+    # ---- résumé formats: how the PDFs look (jobpipe/formats.py) --------------------------------------
+    # One default, in Profile. Changing it can redraw every résumé already made; one that would go over the
+    # new format's page limit keeps its format, and its Résumé tab offers a trim made for the new one.
+    def tailored_workspaces() -> list[tuple[str, ResumeWorkspace]]:
+        out = []
+        for jid, st in board.state().items():
+            run_dir = local_path((st or {}).get("run_dir"))
+            if run_dir and (run_dir / "resume-final.md").exists():
+                out.append((jid, workspace(jid)))
+        return out
+
+    def job_line(jid: str) -> dict:
+        row = board.row(jid) or {}
+        return {"id": jid, "title": row.get("title") or "", "company": row.get("company") or ""}
+
+    def preview_md() -> str:
+        """The résumé the format previews show: the profile's fallback résumé, else the example's."""
+        for f in config.candidate().resumes.values():
+            path = references() / f
+            if path.exists():
+                text = path.read_text()
+                try:
+                    render.render(text)
+                    return text
+                except Exception:  # noqa: BLE001 - not in the markdown shape: use the example
+                    break
+        return (config.EXAMPLE_PROFILE / "references" / "resume-platform.md").read_text()
+
+    preview_lock = threading.Lock()
+
+    def preview_file(fid: str, kind: str) -> Path:
+        """A format's preview of the fallback résumé, made on first ask and kept until the résumé or the format
+        changes. The Profile asks for all five thumbnails at once, so the first ask draws them all in one browser."""
+        if not formats.known(fid):
+            raise HTTPException(404, "Unknown résumé format")
+        md = preview_md()
+        folder = store.root / "format-previews"
+
+        def path_for(f: str) -> Path:
+            key = hashlib.blake2b((md + f + render.CSS + formats.get(f).css).encode(), digest_size=6).hexdigest()
+            return folder / f"{f}-{key}.{kind}"
+        if not path_for(fid).exists():
+            with preview_lock:
+                todo = [f for f in (formats.FORMATS if kind == "png" else [fid]) if not path_for(f).exists()]
+                if todo:
+                    folder.mkdir(parents=True, exist_ok=True)
+                    with render.Printer() as pr:
+                        for f in todo:
+                            for old in folder.glob(f"{f}-*.{kind}"):
+                                old.unlink(missing_ok=True)
+                            tmp = folder / f"{f}.tmp.{kind}"
+                            if kind == "pdf":
+                                pr.pdf(md, tmp, fmt=f)
+                            else:
+                                pr.png(render.render(md, fmt=f), tmp)
+                            tmp.replace(path_for(f))
+        return path_for(fid)
+
+    @app.get("/api/formats")
+    def get_formats():
+        default = default_format()
+        behind = []
+        for jid, ws in tailored_workspaces():
+            fid = ws.format_id()
+            if fid != default.id:
+                behind.append({**job_line(jid), "format": formats.get(fid).name})
+        return {"default": default.id, "behind": behind,
+                "formats": [{"id": f.id, "name": f.name, "font": f.font, "accent": f.accent, "blurb": f.blurb,
+                             "max_pages": f.max_pages, "pages_word": f.pages_word} for f in formats.FORMATS.values()]}
+
+    @app.get("/api/formats/{fid}/preview.pdf")
+    def format_preview(fid: str, request: Request):
+        return cached_file(request, preview_file(fid, "pdf"), "application/pdf")
+
+    @app.get("/api/formats/{fid}/thumb.png")
+    def format_thumb(fid: str, request: Request):
+        return cached_file(request, preview_file(fid, "png"), "image/png")
+
+    @app.put("/api/profile/format")
+    async def put_format(body: dict):
+        """Make a format the default: {"format": id, "redraw": bool}. With redraw, every résumé already made is
+        drawn in it, except one that would go over its page limit or is being edited right now."""
+        fid = str(body.get("format") or "")
+        if not formats.known(fid):
+            raise HTTPException(400, "Choose one of the résumé formats.")
+        redraw = bool(body.get("redraw"))
+        if redraw:
+            not_mid_run()
+        try:
+            searches_file.save_resume_format(searches_path, fid)
+        except searches_file.SearchError as e:
+            raise HTTPException(400, str(e)) from None
+        fmt, redrawn, over = formats.get(fid), 0, []
+        if redraw:
+            def draw_all():
+                nonlocal redrawn
+                with render.Printer() as pr:
+                    for jid, ws in tailored_workspaces():
+                        if edit_busy(jid):
+                            continue
+                        try:
+                            r = ws.redraw(fmt, pr)
+                        except (EditError, OSError, ValueError):
+                            continue
+                        if r["applied"]:
+                            redrawn += r["pages"] is not None
+                        else:
+                            over.append({**job_line(jid), "pages": r["pages"]})
+            await asyncio.to_thread(draw_all)
+        return {**get_formats(), "redrawn": redrawn, "over": over}
+
+    @app.post("/api/jobs/{jid}/resume/format")
+    def redraw_resume(jid: str):
+        """Draw this résumé in the default format. When it would go over the format's page limit it stays as it
+        is, and the reply carries the chat message that trims it to fit."""
+        if edit_busy(jid):
+            raise HTTPException(409, "Claude is still answering; wait for the reply.")
+        ws = workspace(jid)
+        fmt = default_format()
+        try:
+            r = ws.redraw(fmt)
+        except EditError as e:
+            raise HTTPException(400, str(e)) from None
+        return {**r, "trim": None if r["applied"] else ws.trim_instruction(fmt, r["pages"]),
+                "trim_format": fmt.id, "resume": resume_payload(ws, jid)}
 
     # ---- markdown documents: the impact record and interview prep ---------------------------------
     # Edited in the app's Impact record and Interview prep tabs, which save as you type. Each save checks

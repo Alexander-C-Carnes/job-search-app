@@ -296,6 +296,19 @@
           <div id="look-picker" class="look-picker" role="radiogroup" aria-label="Look"></div>
         </section>
 
+        <section class="pcard look-card format-card" id="format-card">
+          <h2>Résumé format</h2>
+          <p class="muted">How the résumés the app makes look. The words are the same in every format, so the scores and ATS results don't change. The previews use your fallback résumé.</p>
+          <div id="format-picker" class="format-picker" role="radiogroup" aria-label="Résumé format"></div>
+          <div class="format-foot">
+            <label class="check"><input type="checkbox" id="format-redraw" checked> Redraw the résumés already made in it</label>
+            <span class="grow"></span>
+            <a id="format-pdf" class="link-btn" target="_blank" rel="noopener">Preview PDF ↗</a>
+            <button type="button" id="format-save" class="primary" disabled>Use this format</button>
+          </div>
+          <div id="format-status" class="format-status"></div>
+        </section>
+
         <form id="profile-form" class="pview" autocomplete="off" novalidate>
           <div id="profile-first" class="notice hidden">
             <h3>Set up your profile</h3>
@@ -325,9 +338,9 @@
             <p class="muted">Tick the résumés to score each job against, alongside your impact record. Each name labels a column of the heat map. The fallback is where the writers start when the matcher's pick isn't one of these.</p>
             <ul id="resume-files" class="rfiles"></ul>
             <div class="rfiles-foot">
-              <button type="button" id="resume-add" class="ghost">Add a résumé (.md)…</button>
-              <input type="file" id="resume-upload" accept=".md,.markdown,text/markdown" hidden>
-              <span class="hint">Saved in your profile folder's <code>references/</code>. Use the markdown shape in the README so it can be rendered.</span>
+              <button type="button" id="resume-add" class="ghost">Add a résumé…</button>
+              <input type="file" id="resume-upload" accept=".pdf,.docx,.md,.markdown,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain" hidden>
+              <span class="hint">A PDF or Word file, saved from the program you wrote it in (not a scan), or Markdown or text. You check what the app read before it's saved in <code>references/</code>.</span>
             </div>
           </section>
           <section class="pcard">
@@ -433,6 +446,11 @@
         <button class="primary">Add</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="import-dialog" class="import-dialog" aria-labelledby="import-title">
+    <div class="import-head"><h2 id="import-title">Add a résumé</h2><p class="muted" id="import-sub"></p></div>
+    <div id="import-body"></div>
   </dialog>
 
   <dialog id="describe-dialog">

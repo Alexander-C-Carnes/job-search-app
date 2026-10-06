@@ -31,6 +31,7 @@ def main():
     ap.add_argument("--trace", help="trace-X.md to confirm every bullet is traced")
     ap.add_argument("--city", default="", help="the City, ST the contact line must show")
     ap.add_argument("--name", default="the candidate", help="the candidate's first name, for messages")
+    ap.add_argument("--max-pages", type=int, default=2, help="the résumé format's page limit (Compact: 1)")
     ap.add_argument("--withdrawn", action="append", default=[],
                     help="a figure the impact record withdrew, e.g. 41.2%% (repeatable); its presence fails")
     a = ap.parse_args()
@@ -112,8 +113,9 @@ def main():
 
     # 8. length
     words = len(re.findall(r"\b\w+\b", text))
-    if words > 1100:
-        warns.append(f"{words} words: likely over two pages")
+    limit = 650 if a.max_pages == 1 else 1100
+    if words > limit:
+        warns.append(f"{words} words: likely over {'one page' if a.max_pages == 1 else f'{a.max_pages} pages'}")
 
     # 9. trace coverage
     bullets = [l.strip()[2:] for l in lines if l.strip().startswith("- ")]

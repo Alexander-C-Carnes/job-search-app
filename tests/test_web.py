@@ -654,7 +654,8 @@ def test_editable_page_renders_like_the_pdf():
     page = render.render(md, editable=True)
     assert "data-ed" not in plain and "page-guide" in page
     import re
-    assert re.sub(r'<span data-ed="[^"]+"[^>]*>|</span>', "", page.split("</style>", 1)[1]) == plain.split("</style>", 1)[1]
+    spans = lambda doc: re.sub(r"<span[^>]*>|</span>", "", doc.split("</style>", 1)[1])   # the editor's and the job line's
+    assert spans(page) == spans(plain)
 
 
 def test_chat_answers_questions_and_remembers_the_conversation(env):
@@ -1513,3 +1514,126 @@ def test_other_keys(env, monkeypatch):
     k = {x["name"]: x for x in c.put("/api/keys", headers=H, json={"name": "JOBSPIPE_API_KEY", "value": "jp_live_1"}).json()["keys"]}
     assert k["JOBSPIPE_API_KEY"]["set"] and "jp_live_1" not in str(k)
     assert "JOBSPIPE_API_KEY=jp_live_1" in (config.PROFILE / ".env").read_text()
+
+
+# ---- résumé formats --------------------------------------------------------------------------------------
+LONG = "\n".join(f"- Led delivery review {k} across platform teams, cutting release risk with clear owners and dates."
+                 for k in range(14))
+
+
+def test_formats_are_listed_with_previews(env):
+    c = env["client"]
+    d = c.get("/api/formats", headers=H).json()
+    assert d["default"] == "signature" and d["behind"] == []
+    assert [f["id"] for f in d["formats"]] == ["signature", "executive", "modern", "minimal", "compact"]
+    assert next(f for f in d["formats"] if f["id"] == "compact")["max_pages"] == 1
+    r = c.get("/api/formats/modern/thumb.png", headers=H)
+    assert r.status_code == 200 and r.content[:4] == b"\x89PNG"
+    assert c.get("/api/formats/modern/preview.pdf", headers=H).content[:4] == b"%PDF"
+    assert c.get("/api/formats/nope/thumb.png", headers=H).status_code == 404
+
+
+def test_a_new_default_format_redraws_the_resumes_already_made(env):
+    c = env["client"]
+    before = env["pdf"].read_bytes()
+    d = c.put("/api/profile/format", headers=H, json={"format": "executive", "redraw": True}).json()
+    assert (d["default"], d["redrawn"], d["over"], d["behind"]) == ("executive", 1, [], [])
+    assert "resume_format: executive" in env["searches"].read_text()
+    r = c.get("/api/jobs/j1", headers=H).json()["resume"]
+    assert r["format"]["id"] == "executive" and r["versions"][-1]["format"] == "executive"
+    assert env["pdf"].read_bytes() != before                      # the deliverable PDF is redrawn too
+    assert c.put("/api/profile/format", headers=H, json={"format": "fancy"}).status_code == 400
+    # Without redraw, résumés keep their format and are listed as behind
+    d = c.put("/api/profile/format", headers=H, json={"format": "minimal"}).json()
+    assert d["redrawn"] == 0 and [b["format"] for b in d["behind"]] == ["Executive"]
+    r = c.post("/api/jobs/j1/resume/format", headers=H).json()
+    assert r["applied"] and r["resume"]["format"]["id"] == "minimal"
+
+
+def test_compact_keeps_a_resume_that_runs_long_until_a_trim_is_accepted(env):
+    c, runner = env["client"], env["runner"]
+    md = _resume().replace("\n\n**Fabrikam Games**", "\n" + LONG + "\n\n**Fabrikam Games**")
+    (env["run_dir"] / "resume-final.md").write_text(md)
+    d = c.put("/api/profile/format", headers=H, json={"format": "compact", "redraw": True}).json()
+    assert d["redrawn"] == 0 and d["over"][0]["id"] == "j1" and d["over"][0]["pages"] >= 2
+    assert d["behind"][0]["format"] == "Signature"
+    r = c.post("/api/jobs/j1/resume/format", headers=H).json()
+    assert not r["applied"] and r["trim_format"] == "compact" and "one page in the Compact format" in r["trim"]
+    assert r["resume"]["format"]["id"] == "signature" and r["resume"]["default_format"]["id"] == "compact"
+    # The trim is a chat message held to Compact: its proposal is drawn in Compact, and accepting it switches.
+    p = c.post("/api/jobs/j1/edit", headers=H, json={"instruction": r["trim"], "format": "compact"}).json()["proposal"]
+    call = runner.calls[-1]
+    assert "fit one page in the Compact format" in call.instructions
+    assert p["format"] == "compact" and p["pages"] == 1
+    c.post("/api/jobs/j1/edit/accept", headers=H)
+    r = c.get("/api/jobs/j1", headers=H).json()["resume"]
+    assert r["format"]["id"] == "compact" and c.get("/api/formats", headers=H).json()["behind"] == []
+    page = c.get("/api/jobs/j1/resume/page", headers=H).json()
+    assert (page["margin_in"], page["max_pages"]) == (0.5, 1)
+    assert c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "x", "format": "bogus"}).status_code == 400
+
+
+# ---- uploading a résumé ----------------------------------------------------------------------------------
+def _sorter(runner, md=None, notes="None.", fail=None):
+    """Claude sorting an upload into the markdown shape."""
+    pipeline_run = runner.pipeline.run
+
+    async def run(call):
+        if call.label == "resume-import":
+            runner.calls.append(call)
+            if fail:
+                raise RuntimeError(fail)
+            return AgentResult(files={"resume.md": md or _resume(), "notes.md": notes}, summary="")
+        return await pipeline_run(call)
+    runner.pipeline.run = run
+
+
+def _upload(c, name, data):
+    return c.post("/api/profile/resumes/import", headers={**H, "X-Filename": quote(name)}, content=data)
+
+
+def test_upload_a_pdf_resume_review_it_and_save_it(env, tmp_path):
+    from jobpipe import config as cfgmod
+    c, runner = env["client"], env["runner"]
+    _sorter(runner, notes="- Couldn't read the Woodgrove dates.")
+    pdf = tmp_path / "Jordan Rivera Resume.pdf"
+    render.render_pdf(_resume(), pdf)
+    d = _upload(c, pdf.name, pdf.read_bytes()).json()
+    call = next(x for x in runner.calls if x.label == "resume-import")
+    assert "Northwind Cloud" in call.documents["resume.txt"] and call.candidate is False
+    assert d["kind"] == "PDF" and d["has_original"] and d["name"] == "jordan-rivera" and d["kept"] > 90
+    assert "<h2" in d["html"] and any(f["text"] == "Claude: Couldn't read the Woodgrove dates." for f in d["flags"])
+    assert c.get(f"/api/profile/resumes/import/{d['id']}/original.pdf", headers=H).content[:4] == b"%PDF"
+    # edited on the review screen: checked again against the file, no AI
+    n = len(runner.calls)
+    e = c.post(f"/api/profile/resumes/import/{d['id']}/check", headers=H,
+               json={"markdown": d["markdown"].replace("Ran the ledger", "Spearheaded the ledger")}).json()
+    assert "spearheaded" in e["added"] and len(runner.calls) == n
+    saved = c.post("/api/profile/resumes", headers=H, json={"markdown": d["markdown"], "filename": "jordan-rivera.md",
+                                                            "import_id": d["id"]}).json()
+    assert saved["file"] == "resume-jordan-rivera.md"
+    assert (cfgmod.REFERENCES / "originals" / "resume-jordan-rivera.pdf").read_bytes() == pdf.read_bytes()
+    assert c.post(f"/api/profile/resumes/import/{d['id']}/check", headers=H, json={"markdown": "x"}).status_code == 404
+
+
+def test_upload_a_word_file_and_markdown_already_in_shape(env):
+    from test_resume_import import WORD_BODY, docx, para
+    c, runner = env["client"], env["runner"]
+    _sorter(runner)
+    d = _upload(c, "cv.docx", docx(WORD_BODY, para("Jordan Rivera"))).json()
+    assert d["kind"] == "Word file" and not d["has_original"]
+    assert "Moved 31 payment services" in d["source"] and any("page header" in f["text"] for f in d["flags"])
+    n = len(runner.calls)
+    m = _upload(c, "resume-platform.md", _resume().encode()).json()       # nothing to sort
+    assert len(runner.calls) == n and m["markdown"] == _resume() and m["kept"] == 100 and m["name"] == "platform"
+
+
+def test_upload_falls_back_to_a_rough_sort_and_refuses_what_it_cant_read(env):
+    c, runner = env["client"], env["runner"]
+    _sorter(runner, fail="Claude isn't signed in")
+    d = _upload(c, "cv.txt", b"Jordan Rivera\nProgram Manager\njordan@example.com\n\nEXPERIENCE\n- Led things\n").json()
+    assert d["markdown"].startswith("# Jordan Rivera\n**Program Manager**")
+    assert any("Claude couldn't sort it (Claude isn't signed in)" in f["text"] for f in d["flags"])
+    r = _upload(c, "cv.doc", b"x")
+    assert r.status_code == 400 and "save it as .docx" in r.json()["detail"]
+    assert c.post("/api/profile/resumes/import/nothex/check", headers=H, json={"markdown": "x"}).status_code == 404

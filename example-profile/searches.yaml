@@ -36,6 +36,8 @@ candidate:
   linkedin: linkedin.com/in/jordan-rivera-example
   # PDFs are named <pdf_prefix>-<Company>-<Title>.pdf (default: the name with dashes, then -Resume).
   pdf_prefix: Jordan-Rivera-Resume
+  # How résumé PDFs look: signature, executive, modern, minimal or compact (one page). Set on the Profile tab.
+  resume_format: signature
   # Your existing résumés in references/, scored alongside the impact record:
   # a source name (a heat-map column) -> file name. The first is the fallback base résumé.
   resumes:

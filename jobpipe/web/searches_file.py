@@ -140,6 +140,7 @@ def load_candidate(path: Path) -> Optional[dict]:
         return None
     out = {k: str(c[k]) if c.get(k) is not None else "" for k in (*CANDIDATE_TEXT, "evidence")}
     out["resumes"] = [{"name": str(k), "file": str(v)} for k, v in (c.get("resumes") or {}).items()]
+    out["resume_format"] = str(c.get("resume_format") or "signature")
     return out
 
 
@@ -181,6 +182,24 @@ def clean_candidate(raw: dict, references: Path) -> dict:
         raise SearchError("Tick at least one résumé to score against.")
     out["resumes"] = resumes
     return out
+
+
+def save_resume_format(path: Path, fid: str) -> None:
+    """Set `candidate.resume_format`, keeping the file's comments. The profile needs saving first."""
+    doc = _yaml().load(path.read_text())
+    m = doc.get("candidate")
+    if m is None:
+        raise SearchError("Save your profile first, then choose a résumé format.")
+    if "resume_format" not in m:
+        keys = list(m)
+        at = keys.index("pdf_prefix") + 1 if "pdf_prefix" in keys else len(keys)
+        m.insert(at, "resume_format", fid, comment="how résumé PDFs look (Profile › Résumé format)")
+    else:
+        m["resume_format"] = fid
+    tmp = path.with_suffix(".yaml.tmp")
+    with tmp.open("w") as f:
+        _yaml().dump(doc, f)
+    tmp.replace(path)
 
 
 def save_candidate(path: Path, cand: dict) -> None:

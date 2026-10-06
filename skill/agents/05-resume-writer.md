@@ -24,7 +24,7 @@ Never start from an existing resume's bullets, wording, or bullet order, even th
 All three lenses follow every rule. The lens decides what wins when rules leave a choice.
 - **A — Posting language.** Maximize verbatim posting phrases wherever the evidence supports them: headline, summary, the lead phrase of every relevant bullet, CORE SKILLS. Keep the posting's capitalization and hyphenation.
 - **B — Evidence fidelity.** Every line is the most defensible version of the evidence: exact figures, exact scope verbs, the strongest quantified result for each requirement. Posting phrases still lead bullets, but never stretch to fit one.
-- **C — Recruiter scorecard.** Every met High-weight must-have appears in a bullet in the posting's words; bullets are one-line mini-STARs a recruiter can lift into a scorecard; the page is lean enough to fit two pages.
+- **C — Recruiter scorecard.** Every met High-weight must-have appears in a bullet in the posting's words; bullets are one-line mini-STARs a recruiter can lift into a scorecard; the page is lean enough to fit the length limit you're given (two pages, or one in the Compact format).
 
 ## Hard rules
 - Only cite ledger items (or the impact record text they point to). No new claims, figures, titles, tools, or scope.

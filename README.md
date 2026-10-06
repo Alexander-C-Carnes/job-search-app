@@ -1,6 +1,6 @@
 # job-search
 
-A personal job-hunting pipeline. It finds new postings on [JobsPipe](https://jobspipe.dev), scores each one against your record of past work, writes a tailored two-page résumé (PDF) for the best ones, and keeps a job tracker that syncs with Notion. It runs on your own Mac, as a command-line tool and as a local web app. Claude does the scoring and writing through your Claude subscription, so you don't pay for API credits.
+A personal job-hunting pipeline. It finds new postings on [JobsPipe](https://jobspipe.dev), scores each one against your record of past work, writes a tailored résumé (PDF, in one of five formats) for the best ones, and keeps a job tracker that syncs with Notion. It runs on your own Mac, as a command-line tool and as a local web app. Claude does the scoring and writing through your Claude subscription, so you don't pay for API credits.
 
 Everything about you lives in your own **profile folder**, outside the repo: your record of past work, your résumés, your settings and searches, your API keys, and every job, tracker row and résumé the app makes. It's `~/JobSearch` unless you set `JOBPIPE_HOME`. The repo holds only the code and the method, so anyone can use it, and pulling updates never touches your files. [Set it up for yourself](#set-it-up-for-yourself) takes you through it.
 
@@ -14,7 +14,7 @@ searches.yaml ──► JobsPipe search ──► local filters ──► skip j
                                                          │  best N with fit ≥ 7
                                                          ▼
           resume-job-fit (Stage 1 analysts ×3 → matcher → writers A/B/C → rater → merge
-                          → PDF in the two-page format → heat map + report)
+                          → PDF in your résumé format → heat map + report)
                                                          │
                                                          ▼
               Notion Tasks row · apply-*.md checklist · digest.md          ──►  you apply
@@ -29,7 +29,7 @@ searches.yaml ──► JobsPipe search ──► local filters ──► skip j
    - three writers draft résumés independently, each with a different emphasis, using the posting's own wording wherever your evidence supports it;
    - the drafts are rated and merged into one résumé, which is checked by `skill/scripts/check_resume.py` (format and honesty rules) and an ATS keyword scorer;
    - small Hugging Face models running on your Mac check the merged résumé against your evidence: whether every line is backed by what it cites (flagged lines get one review pass), and which posting keywords it's missing that your record does support (those go into a keyword pass) — see [Evidence checks](#evidence-checks-local-models);
-   - the résumé is rendered to a two-page PDF, with a fit report and an interactive heat map.
+   - the résumé is rendered to a PDF in your résumé format (two pages; one in Compact), with a fit report and an interactive heat map.
 5. **Track it.** The job is recorded in a local tracker (`data/tracker.db`) and copied to a Notion database. You also get an `apply-*.md` checklist with the link, the PDF to attach, and the posting's hard requirements, plus a `digest.md` for the run.
 6. **You apply.** The pipeline never submits an application. You review the résumé, apply, and set the job to Applied.
 
@@ -122,7 +122,7 @@ Everything Claude knows about you comes from your profile's `references/` folder
 
 It can be long (10,000 words is fine). Claude only uses what's written down, so detail you leave out can't appear in a résumé. A good way to build one is to ask Claude to interview you about each job, then edit the result. You can write and edit it in the app: the **Impact record** tab shows it formatted, like Typora, and saves it back as markdown.
 
-**Your existing résumés** (`references/resume-<name>.md`, any number). These are scored alongside the impact record and give the writers a format to follow. Add them in the app (**Profile → Add a résumé**) or put the files there yourself. At least one should use the markdown shape the PDF renderer reads:
+**Your existing résumés** (`references/resume-<name>.md`, any number). These are scored alongside the impact record and give the writers a format to follow. Add them in the app with **Profile → Add a résumé**: a PDF or Word file (saved from the program you wrote it in, not a scan), Markdown or plain text. Claude sorts it into the markdown shape below using only your file's words, the app checks that word by word, and you see your file beside the result, fix anything it flags, and save; the original is kept in `references/originals/`. Or put the files there yourself. How the PDFs look is a separate choice: **Profile → Résumé format** (Signature, Executive, Modern, Minimal, or Compact on one page). At least one should use the markdown shape the PDF renderer reads:
 
 ```markdown
 # Your Name
@@ -452,7 +452,7 @@ Settings are in the `evidence:` section of `searches.yaml`: the three model name
 | 2: matcher | same brief; `ratings.json` / `keywords.json` are validated and re-requested once if malformed |
 | 3: writers A/B/C in parallel | same brief and lenses; each draft goes through `check_resume.py`; a rater call rates each draft literally for the draft scorecard |
 | 4: merge | the skill's Stage 4 text as the merge brief; `check_resume.py` on the result, one fix pass on FAIL; the local [evidence checks](#evidence-checks-local-models), with one honesty review pass for flagged lines; one keyword-restore pass if Total % drops below the best draft or the evidence supports a missing keyword |
-| 5: PDF | `jobpipe/render.py` (the two-page résumé format); tightens header spacing once if over two pages; scorecard re-run on the PDF text |
+| 5: PDF | `jobpipe/render.py` in the format chosen on the Profile tab (`jobpipe/formats.py`); tightens spacing once, then trims (deleting only) if over the format's page limit (two pages; one in Compact); scorecard re-run on the PDF text |
 | 6: report | `heatmap.py` + the report template |
 | 7: Notion | `jobpipe/tracker.py` records the job locally with the same update rules (never moves Blocked, Applied or any later stage back, keeps your Notes text) and `jobpipe/notion.py` copies it to Notion with the same properties, now or on the next sync |
 

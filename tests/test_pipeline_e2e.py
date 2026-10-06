@@ -138,8 +138,8 @@ def test_resume_over_two_pages_is_trimmed(tmp_dirs, monkeypatch):
     from jobpipe import render
     real, calls = render.render_pdf, []
 
-    def render_pdf(md, pdf, html=None):         # the merged resume runs to three pages; the trimmed one fits
-        pages, text = real(md, pdf, html)
+    def render_pdf(md, pdf, html=None, fmt=None):   # the merged resume runs to three pages; the trimmed one fits
+        pages, text = real(md, pdf, html, fmt)
         calls.append(md)
         return (3 if len(calls) == 1 else pages), text
 
@@ -154,6 +154,30 @@ def test_resume_over_two_pages_is_trimmed(tmp_dirs, monkeypatch):
     assert c.tailored.pages == 2 and not any("page" in w for w in c.tailored.warnings)
     merge = next(x for x in runner.calls if x.label == "merge")
     assert "Hard length limit" in merge.instructions
+
+
+def test_compact_format_writes_and_trims_to_one_page(tmp_dirs, monkeypatch):
+    import dataclasses
+    from jobpipe import config, render
+    from conftest import CANDIDATE
+    monkeypatch.setattr(config, "candidate", lambda path=None: dataclasses.replace(CANDIDATE, resume_format="compact"))
+    real, calls = render.render_pdf, []
+
+    def render_pdf(md, pdf, html=None, fmt=None):   # two pages first; the trimmed one fits
+        pages, text = real(md, pdf, html, fmt)
+        calls.append(fmt.id)
+        return (2 if len(calls) == 1 else pages), text
+
+    monkeypatch.setattr(render, "render_pdf", render_pdf)
+    p, runner, _ = build(tmp_dirs, {"Technical Program Manager": [make_job("best")]}, {"best": 9})
+    c = asyncio.run(p.tailor_job(make_job("best")))
+    assert calls == ["compact", "compact"]
+    trim = next(x for x in runner.calls if x.label == "trim")
+    assert "# Trim to one page" in trim.instructions and "renders to 2 pages" in trim.instructions
+    assert "fit one page in the Compact format" in next(x for x in runner.calls if x.label == "merge").instructions
+    assert "fit one page" in next(x for x in runner.calls if x.label.startswith("05-writer")).instructions
+    assert (c.tailored.run_dir / "resume-format.txt").read_text().strip() == "compact"
+    assert c.tailored.pages == 1 and not any("page" in w for w in c.tailored.warnings)
 
 
 def test_final_rating_is_the_synthesis_of_three():

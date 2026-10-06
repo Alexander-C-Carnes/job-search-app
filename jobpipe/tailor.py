@@ -7,7 +7,7 @@ Stage 3  05 Writers A | B | C                         (parallel) -> drafts, trac
          Rater: rates each draft literally           -> draft scorecard
 Stage 4  Merge -> resume-final.md (+ check, honesty check against the evidence, keyword-restore pass if Total
          drops or the evidence supports a missing keyword)
-Stage 5  PDF (resume-format) -> page count (trim pass if over two pages), PDF-text scorecard
+Stage 5  PDF (resume-format) -> page count (trim pass if over the format's page limit), PDF-text scorecard
 Stage 6  Heat map + report.md
 Stage 7 (Notion) runs in pipeline.py so that triaged jobs share it.
 
@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import config, evidence, render
+from . import config, evidence, formats, render
 from .config import Config
 from .llm import AgentCall, AgentError, Runner, brief, candidate_materials, write_files
 
@@ -180,10 +180,11 @@ def check_keywords(text: str) -> list[str]:
     return []
 
 
-def run_script(name: str, *args: str, cwd: Path) -> tuple[int, str]:
+def run_script(name: str, *args: str, cwd: Path, max_pages: Optional[int] = None) -> tuple[int, str]:
     if name == "check_resume.py":           # the contact-line check and its wording are the candidate's
-        cand = config.candidate()
+        cand = config.candidate()           # the page limit is the résumé's format's (the default format's if not given)
         args = (*args, "--city", cand.city, "--name", cand.first_name,
+                "--max-pages", str(max_pages or formats.get(cand.resume_format).max_pages),
                 *(x for w in cand.withdrawn for x in ("--withdrawn", w)))
     p = subprocess.run([sys.executable, str(SCRIPTS / name), *args], cwd=cwd,
                        capture_output=True, text=True)
@@ -203,16 +204,11 @@ def exact_title(objectives_md: str, fallback: str) -> str:
 
 # ---------------------------------------------------------------------------
 
-# The page limit, as the merge and trim steps are told it. render_pdf decides the actual page count.
-MAX_WORDS = 950
-LENGTH_RULES = (f"Hard length limit: the resume must fit two pages, about {MAX_WORDS} words at most. The most recent "
-                "role has at most 8 bullets and each earlier role at most 4; every bullet is at most two lines "
-                "(about 35 words): the posting's lead phrase, the action, the strongest figure. ADDITIONAL "
-                "EXPERIENCE entries are one line each.")
+# The page limit the writers, the merge and the trim step are told is the résumé format's (formats.length_rules);
+# render_pdf decides the actual page count.
+TRIM_BRIEF = """# Trim to {limit}
 
-TRIM_BRIEF = """# Trim to two pages
-
-The tailored resume below renders to {pages} pages ({words} words); it must fit two. Shorten it by deleting only:
+The tailored resume below renders to {pages} pages ({words} words); it must fit {limit}. Shorten it by deleting only:
 
 1. Cut whole bullets first: those proving Low-weight requirements, then Med, then any bullet that proves the same
    requirement as another. Keep every bullet that is the only proof of a High-weight requirement (requirement IDs and
@@ -374,6 +370,7 @@ class Tailor:
         self.runner = runner
         self.out_dir = out_dir
         self.log = log
+        self.fmt = formats.get(None)                # the résumé format; run() reads the candidate's default
         self._no_models: Optional[str] = None       # why the evidence models aren't used, once known
 
     async def _evidence_index(self) -> Optional[evidence.Index]:
@@ -435,7 +432,7 @@ class Tailor:
         fix = await self.runner.run(AgentCall(
             label="honesty-fix", model=self.cfg.writer_model,
             instructions=HONESTY_BRIEF + "\n\n---\nWriter brief, for the resume shape and hard rules:\n\n"
-            + brief("05-resume-writer.md") + "\n\n" + LENGTH_RULES,
+            + brief("05-resume-writer.md") + "\n\n" + formats.length_rules(self.fmt),
             documents={"jd.md": jd_md, "04-match.md": match_md, "honesty.md": table,
                        "resume-final.md (current)": md, "trace-final.md (current)": read("trace-final.md"),
                        "merge-notes.md (current)": read("merge-notes.md")},
@@ -528,6 +525,9 @@ class Tailor:
         cfg, A, W = self.cfg, self.cfg.analysis_model, self.cfg.writer_model
         a = await self.analyze(meta, jd_md, run_dir)
         warnings = list(a.warnings)
+        fmt = self.fmt = formats.get(config.candidate().resume_format)
+        limits = formats.length_rules(fmt)
+        (run_dir / "resume-format.txt").write_text(fmt.id + "\n")     # the résumé workspace draws its PDFs in it
         base_sources = [config.IMPACT_SOURCE, *config.candidate().resumes]
         objectives, title, match_md = a.objectives, a.exact_title, a.match_md
         ratings, keywords, base = a.ratings, a.keywords, a.base
@@ -540,7 +540,7 @@ class Tailor:
         wdocs = {"jd.md": jd_md, "04-match.md": match_md}
         wnote = (f"\n\nOrchestrator notes:\n- Best existing resume, for the frame only: {base} "
                  f"(<skill>/references/{config.candidate().resumes[base]}). Build every bullet from the ledger.\n"
-                 f"- The posting's exact job title: {title}")
+                 f"- The posting's exact job title: {title}\n- {limits}")
         writers = await asyncio.gather(*(
             self.runner.run(AgentCall(
                 label=f"05-writer-{L}", model=W, instructions=brief("05-resume-writer.md") + wnote,
@@ -586,7 +586,7 @@ class Tailor:
                        + brief("05-resume-writer.md")
                        + f"\n\nThe posting's exact job title: {title}\nBest draft by Total %: {best_draft} "
                        f"({best_total:.0f}%). Outputs: resume-final.md, trace-final.md, merge-notes.md.\n\n"
-                       + LENGTH_RULES)
+                       + limits)
         merged = await self.runner.run(AgentCall(label="merge", model=W, instructions=merge_instr, documents=mdocs,
                                                  expect=["resume-final.md", "trace-final.md", "merge-notes.md"],
                                                  run_dir=run_dir))
@@ -678,24 +678,24 @@ class Tailor:
         pdf = self.out_dir / pdf_name
         pdf_text, pages = "", 0
         try:
-            pages, pdf_text = await asyncio.to_thread(render.render_pdf, final_md, pdf, run_dir / "resume-final.html")
+            pages, pdf_text = await asyncio.to_thread(render.render_pdf, final_md, pdf, run_dir / "resume-final.html", fmt)
             trimmed = False
-            for _ in range(2):                  # over two pages: cut it back (deleting only), then render again
-                if pages <= 2:
+            for _ in range(2):                  # over the page limit: cut it back (deleting only), then render again
+                if pages <= fmt.max_pages:
                     break
                 words = len(re.findall(r"\b\w+\b", final_md))
-                self.log(f"  Stage 5: {pages} pages ({words} words); trimming to two")
+                self.log(f"  Stage 5: {pages} pages ({words} words); trimming to {fmt.pages_word}")
                 trace = run_dir / "trace-final.md"
                 trim = await self.runner.run(AgentCall(
                     label="trim", model=W,
-                    instructions=TRIM_BRIEF.format(pages=pages, words=words, limits=LENGTH_RULES)
+                    instructions=TRIM_BRIEF.format(pages=pages, words=words, limit=fmt.pages_word, limits=limits)
                     + "\n\n---\nWriter brief, for the resume shape and hard rules:\n\n" + brief("05-resume-writer.md"),
                     documents={"jd.md": jd_md, "04-match.md": match_md, "keywords.json": json.dumps(keywords, indent=2),
                                "resume-final.md (current)": final_md,
                                "trace-final.md (current)": trace.read_text() if trace.exists() else ""},
                     expect=["resume-final.md", "trace-final.md"], run_dir=run_dir))
                 final_md, trimmed = trim.files["resume-final.md"], True
-                pages, pdf_text = await asyncio.to_thread(render.render_pdf, final_md, pdf, run_dir / "resume-final.html")
+                pages, pdf_text = await asyncio.to_thread(render.render_pdf, final_md, pdf, run_dir / "resume-final.html", fmt)
             if trimmed:
                 (run_dir / "resume-final.md").write_text(final_md, encoding="utf-8")
                 await self._honesty(final_md, title, jd_md, match_md, index, run_dir, warnings, review=False)
@@ -706,8 +706,8 @@ class Tailor:
                     warnings.append("trimmed resume fails check_resume.py; see checks-final.md")
                 ratings_final = await rate_final(final_md)      # the content changed: rate it again
             (run_dir / "resume-final.pdf.txt").write_text(pdf_text, encoding="utf-8")
-            if pages != 2:
-                warnings.append(f"PDF has {pages} page(s), not 2")
+            if pages != fmt.max_pages:
+                warnings.append(f"PDF has {pages} page(s), not {fmt.max_pages} ({fmt.name} format)")
             if title not in re.sub(r"\s+", " ", pdf_text):
                 warnings.append("exact posting title not found in PDF text")
         except Exception as e:  # noqa: BLE001 - keep the run; report the render failure
