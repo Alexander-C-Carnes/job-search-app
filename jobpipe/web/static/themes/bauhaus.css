@@ -116,7 +116,8 @@ html[data-theme="bauhaus"] .sync-state { color: var(--muted); font-weight: 500; 
 html[data-theme="bauhaus"] .stages { display: flex; align-items: stretch; height: 84px; background: none; border: 0; border-radius: 0; overflow: visible; }
 html[data-theme="bauhaus"] .stages .stage { position: relative; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 0;
   padding: 8px 12px 7px; border: 0; border-radius: 0; background: var(--c); color: var(--black); text-align: left; min-width: 0; transition: flex-grow .4s cubic-bezier(.4, 0, .2, 1); }
-html[data-theme="bauhaus"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 72px; }
+/* sized by count above a 72px floor, but never narrower than its count and name on one line */
+html[data-theme="bauhaus"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 72px; min-width: max-content; }
 html[data-theme="bauhaus"] .stage[data-kind="side"] { flex: 0 0 84px; width: 84px; }
 html[data-theme="bauhaus"] .stage[data-stage="Not started"] { order: 1; }
 html[data-theme="bauhaus"] .stage[data-stage="In progress"] { order: 2; }
@@ -419,14 +420,16 @@ html[data-theme="bauhaus"] .dash-table th { border-bottom: var(--rule); color: v
   html[data-theme="bauhaus"] .tabs { order: 3; flex: 1 1 100%; margin: 6px -11px 0; }
   html[data-theme="bauhaus"] .tabs button { min-height: 40px; }
   html[data-theme="bauhaus"] .stage .n { font-size: 48px; }
-  html[data-theme="bauhaus"] .stage[data-kind="path"] { min-width: 88px; }
+  html[data-theme="bauhaus"] .stage[data-kind="path"] { flex-basis: 88px; }
   html[data-theme="bauhaus"] .stages .stage[data-kind="path"] { padding-inline: 8px; }
 }
-@media (max-width: 760px) {
+@media (max-width: 920px) {  /* below this the row no longer fits big counts with every name whole */
   html[data-theme="bauhaus"] .stages { flex-wrap: wrap; height: auto; }
   html[data-theme="bauhaus"] .stage[data-kind="path"] { flex: 1 1 40%; height: 84px; }
   html[data-theme="bauhaus"] .stage[data-kind="side"] { flex: 1 1 28%; width: auto; height: 72px; }
   html[data-theme="bauhaus"] .stage[data-stage="Blocked"] { margin-left: 0; }
+}
+@media (max-width: 760px) {
   html[data-theme="bauhaus"] .bh-done { width: 100%; }
   html[data-theme="bauhaus"] .cat-card { width: calc(100vw - 32px); }
 }

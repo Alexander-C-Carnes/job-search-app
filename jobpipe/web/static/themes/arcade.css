@@ -122,7 +122,8 @@ html[data-theme="arcade"] .stage, html[data-theme="arcade"] .stage:first-child, 
   position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; height: 44px; padding: 0 10px;
   border: var(--px) solid var(--ink); border-radius: 0; margin-left: calc(-1 * var(--px)); background: var(--c); color: var(--ink); text-align: left; overflow: hidden;
   transition: flex-grow .6s steps(6, end); }
-html[data-theme="arcade"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 76px; }
+/* sized by count above a 76px floor, but never narrower than its count and name */
+html[data-theme="arcade"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 76px; min-width: max-content; }
 html[data-theme="arcade"] .stage[data-stage="Not started"] { order: 1; margin-left: 0; }
 html[data-theme="arcade"] .stage[data-stage="In progress"] { order: 2; }
 html[data-theme="arcade"] .stage[data-stage="Applied"] { order: 3; }
@@ -430,7 +431,7 @@ html[data-theme="arcade"] .stage[data-kind="path"] .n { order: 1; margin-left: 0
 html[data-theme="arcade"] .stage[data-kind="path"] .l { order: 2; font-size: 13px; line-height: 1.1; }
 @media (max-width: 1100px) {
   html[data-theme="arcade"] .stage, html[data-theme="arcade"] .stage:first-child, html[data-theme="arcade"] .stage:nth-child(n+5) { height: 40px; padding: 0 8px; }
-  html[data-theme="arcade"] .stage[data-kind="path"] { min-width: 76px; padding: 0 6px; }
+  html[data-theme="arcade"] .stage[data-kind="path"] { padding: 0 6px; }
   html[data-theme="arcade"] .stage[data-kind="path"] .l { font-size: 11.5px; }
   html[data-theme="arcade"] .stage[data-kind="side"] { padding: 1px 6px; gap: 2px; min-width: 60px; }
 }

@@ -189,9 +189,9 @@ label.inline input { width: 56px; margin: 0; }
 
 /* the pipeline: stage counts that filter, over a strip of the same counts drawn to scale */
 .stage-wrap { flex: 1; min-width: 0; }
-/* as many columns as fit (nine stages need about 1030px); each stage draws its own left and top rule, so a
+/* as many columns as fit (nine stages need about 1300px; 140px holds the longest name with a three-digit count); each stage draws its own left and top rule, so a
    wrapped row is ruled like the first */
-.stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); background: var(--panel); border: 1px solid var(--line); border-width: 0 1px 0 0; border-radius: 9px 9px 0 0; overflow: hidden; }
+.stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); background: var(--panel); border: 1px solid var(--line); border-width: 0 1px 0 0; border-radius: 9px 9px 0 0; overflow: hidden; }
 .stage { border: 0; border-left: 1px solid var(--line); border-top: 1px solid var(--line); background: none; padding: 7px 12px 6px; text-align: left; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .stage:first-child { border-top-left-radius: 9px; }
 .stage:hover { background: var(--panel-2); }
@@ -690,6 +690,10 @@ dialog h2 + p { margin: -6px 0 12px; }
   .doc-body, .doc-body[data-view] { grid-template-columns: minmax(0, 1fr); }
   .doc-body[data-view="split"] { grid-template-rows: 1fr 1fr; }
   .doc-body[data-view="split"] .doc-preview { border-left: 0; border-top: 1px solid var(--line); }
+}
+@media (max-width: 640px) {  /* four stage tiles a row would cut their names short */
+  html[data-theme="classic"] .stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html[data-theme="classic"] .stage:nth-child(5) { border-left: 1px solid var(--line); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }

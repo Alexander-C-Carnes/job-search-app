@@ -111,7 +111,9 @@ html[data-theme="transit"] .chip.round-chip[aria-pressed="false"]::before { cont
 /* the pipeline: a transit line on a white sign. The main line runs through the six path stations;
    the three exits sit on a siding below it, reached by a curve after Done. Each station is a roundel
    with its count, its line colour as the ring and ink as the casing, over its name. */
-html[data-theme="transit"] .stage-wrap { flex: 1 1 620px; min-width: 0; }
+/* the line keeps its natural width (every name whole); when it and the chips don't fit on one line, the chips wrap below */
+html[data-theme="transit"] .jobs-tools .tools-row:has(> .stage-wrap) { flex-wrap: wrap; }
+html[data-theme="transit"] .stage-wrap { flex: 1 1 auto; min-width: auto; }
 html[data-theme="transit"] .stages { position: relative; display: flex; align-items: flex-start; background: var(--panel); border: 0; border-radius: var(--radius);
   box-shadow: inset 0 0 0 1.5px var(--line); overflow: visible; padding: 6px 10px 4px 12px; }
 html[data-theme="transit"] .stages::before { content: ""; position: absolute; left: 10px; top: 16px; width: 6px; height: 27px; border-radius: 3px; background: var(--ink); z-index: 1; }
@@ -119,7 +121,7 @@ html[data-theme="transit"] .stage { position: relative; display: flex; flex-dire
   padding: 4px 6px 4px; border: 0; background: none; text-align: center; border-radius: 4px; }
 html[data-theme="transit"] .stage:hover { background: none; }
 html[data-theme="transit"] .stage:hover .l { text-decoration: underline; text-underline-offset: 2px; }
-html[data-theme="transit"] .stage[data-kind="path"] { flex: 1 1 0; min-width: 78px; }
+html[data-theme="transit"] .stage[data-kind="path"] { flex: 1 1 78px; min-width: max-content; }
 html[data-theme="transit"] .stage[data-kind="side"] { flex: 0 0 84px; padding-top: 32px; }
 html[data-theme="transit"] .stage[data-stage="Not started"] { order: 1; }
 html[data-theme="transit"] .stage[data-stage="In progress"] { order: 2; }
@@ -423,10 +425,10 @@ html[data-theme="transit"] .wysiwyg .ProseMirror h1, html[data-theme="transit"] 
   html[data-theme="transit"] .joblist { margin: 0; border-radius: 0; box-shadow: none; }
   html[data-theme="transit"] .jobs-body.view-list .detail { padding: 0; }
 }
-@media (max-width: 760px) {
-  /* the exits wrap onto their own siding under the main line */
-  html[data-theme="transit"] .stages { flex-wrap: wrap; row-gap: 6px; }
-  html[data-theme="transit"] .stage[data-kind="path"] { flex: 1 1 22%; min-width: 0; }
+@media (max-width: 940px) {
+  /* below this the whole line no longer fits with every name whole: the exits wrap onto their own siding under the main line */
+  html[data-theme="transit"] .stages { flex-wrap: wrap; row-gap: 6px; overflow: clip; }  /* a row's last station would run its line off the sign */
+  html[data-theme="transit"] .stage[data-kind="path"] { flex: 1 1 22%; min-width: max-content; }  /* on a phone a station wraps rather than cut its name */
   html[data-theme="transit"] .stage[data-kind="side"] { flex: 1 1 28%; padding-top: 4px; margin-left: 0; }
   html[data-theme="transit"] .stage[data-kind="side"]::before { top: 15.5px; }
   html[data-theme="transit"] .stage[data-stage="Blocked"]::after { display: none; }
