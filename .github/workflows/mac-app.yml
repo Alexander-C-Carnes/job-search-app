@@ -1,6 +1,6 @@
 # Builds the Mac app (mac/build.sh) for Apple silicon and Intel and attaches the DMGs to a GitHub Release.
 #
-# Releases go out on their own every other day at 07:00 UTC, when main changed since the last release: the
+# Releases go out on their own once a day at 07:00 UTC, when main changed since the last release: the
 # next patch version (v0.1.0 -> v0.1.1) is tagged once both builds pass, so a failed build releases nothing.
 # Installed apps offer the new version the next time they open. Other ways to run it:
 #   git tag v0.2.0 && git push origin v0.2.0      a release now, with a version you choose
@@ -19,7 +19,7 @@ on:
   push:
     tags: ["v*"]
   schedule:
-    - cron: "0 7 */2 * *"          # every other day (odd days of the month), 07:00 UTC
+    - cron: "0 7 * * *"            # once a day, 07:00 UTC
   workflow_dispatch:
     inputs:
       release:
