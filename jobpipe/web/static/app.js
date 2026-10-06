@@ -279,7 +279,7 @@ function visibleJobs() {
 }
 
 // ---- jobs: grouped by company ------------------------------------------------------------------
-// "Booking.com" and "booking.com, Inc." are one company; a job with no company is grouped as such.
+// "Acme.com" and "acme.com, Inc." are one company; a job with no company is grouped as such.
 const companyKey = (j) => (j.company || "").toLowerCase().replace(/[,.]?\s+(inc|llc|ltd|corp|corporation|co)\.?$/, "").trim() || "~";
 // Each company's jobs together, in the chosen sort; companies in the order of their first job
 // (so by best fit, or newest, first), or A–Z when sorting by company.
