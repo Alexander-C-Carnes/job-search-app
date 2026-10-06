@@ -1054,9 +1054,16 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         else:
             raise HTTPException(400, "Unknown run kind")
         try:
-            return runs.start(label, args, marks=marks_now(), key=key, busy=busy).public(0)
+            run = runs.start(label, args, marks=marks_now(), key=key, busy=busy)
         except Busy as e:
             raise HTTPException(409, str(e)) from None
+        if kind in ("tailor", "tailor-pasted"):
+            # The board shows the job In progress now; the run does the same when it starts tailoring.
+            from ..pipeline import Candidate, tailoring_entry
+            st = board.state().get(jid) or {}
+            local.start(tailoring_entry(Candidate(store.job(jid), "manual"), st, date.today().isoformat()), job_id=jid)
+            sync.kick()
+        return run.public(0)
 
     # ---- startups: who just raised, and their open roles ----------------------------------------
     def lookup_keys() -> dict[str, str]:

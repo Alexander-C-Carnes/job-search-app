@@ -874,6 +874,19 @@ def test_runs_side_by_side(env):
     c.post(f"/api/runs/{max(runs.runs)}/stop", headers=H)
 
 
+def test_a_tailoring_run_puts_its_job_in_progress_at_once(env):
+    c, runs = env["client"], env["runs"]
+    runs.runs.clear()
+    runs.argv_prefix = [sys.executable, "-c", "import time; time.sleep(5)"]
+    status = lambda: {j["id"]: j["status"] for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    assert status()["j1"] == "Not started" and status()["j2"] == ""       # j2 isn't tracked yet
+    ids = [c.post("/api/runs", headers=H, json={"kind": "tailor", "job_id": jid}).json()["id"] for jid in ("j1", "j2")]
+    assert status()["j1"] == status()["j2"] == "In progress"
+    for rid in ids:
+        c.post(f"/api/runs/{rid}/stop", headers=H)
+        runs.wait(rid)
+
+
 def test_overlapping_runs_keep_their_own_results(env, monkeypatch):
     c, runs, store = env["client"], env["runs"], env["store"]
     runs.runs.clear()

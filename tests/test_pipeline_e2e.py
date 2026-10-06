@@ -2,6 +2,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 from pypdf import PdfReader
 
 from jobpipe import config
@@ -101,6 +102,23 @@ def test_tailor_pasted_posting_logs_to_notion(tmp_dirs):
     assert not [x for x in runner.calls if x.label.startswith("triage:")]
     row = next(r for r in notion.rows.values() if "_create" in r)
     assert row["_create"]["properties"]["Status"]["status"]["name"] == "In progress"
+
+
+def test_a_job_is_in_progress_while_it_is_tailored(tmp_dirs, monkeypatch):
+    p, runner, notion = build(tmp_dirs, {}, {})
+    seen = []
+
+    async def tailor(c):        # what the tracker shows while the résumé is being written
+        seen.append({r["job_id"]: r["status"] for r in p.tracker.rows()}.get(c.id))
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(p, "_tailor", tailor)
+    job = {"id": "manual", "job_title": TITLE, "company": "Acme", "url": "https://acme.com/jobs/9",
+           "description": make_job()["description"]}
+    with pytest.raises(RuntimeError):
+        asyncio.run(p.tailor_job(job))
+    assert seen == ["In progress"]
+    assert not [r for r in notion.rows.values() if "_create" in r]     # Notion gets it with the run's scores
 
 
 def test_retailoring_archives_web_edit_history(tmp_dirs):

@@ -2040,6 +2040,7 @@ function runStarted(r) {
   showTab("runs");
   selectRun(r.id);
   loadSummary();
+  loadJobs();     // a tailoring run puts its job In progress as it starts
 }
 async function loadRuns() {
   try {

@@ -107,6 +107,16 @@ def tracker_entry(c: Candidate, today: str) -> TrackerEntry:
                         notes=notes_line(c, today), status="Not started", body=body)
 
 
+def tailoring_entry(c: Candidate, st: dict, today: str) -> TrackerEntry:
+    """The row a job gets when tailoring starts, if it isn't tracked yet: its best score so far. The run's
+    own entry replaces the notes and score when it ends."""
+    tri = c.triage.__dict__ if c.triage else st.get("triage") or {}
+    fit = st.get("impact_score") if st.get("impact_score") is not None else tri.get("fit_score")
+    return TrackerEntry(title=c.meta.title, company=c.meta.company, url=c.meta.url,
+                        fit_score=float(fit) if fit is not None else None,
+                        notes=notes_line(c, today) if c.triage else "", status="In progress")
+
+
 def apply_packet(c: Candidate) -> str:
     m, t = c.meta, c.tailored
     hard = ""
@@ -243,6 +253,8 @@ class Pipeline:
                 c.error = "another run is tailoring this job"
                 self.log(f"Skipped tailoring {c.meta.title} @ {c.meta.company}: {c.error}.")
                 return
+            if isinstance(self.tracker, LocalTracker):   # In progress from the start, not when the résumé is done
+                self.tracker.start(tailoring_entry(c, self.store.state().get(c.id, {}), self.today), job_id=c.id)
             await self._tailor(c)
 
     async def _tailor(self, c: Candidate) -> None:

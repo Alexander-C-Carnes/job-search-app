@@ -112,6 +112,27 @@ def test_seed_from_the_old_snapshot_and_working_without_notion(tmp_path):
     assert {r["job_id"]: r["status"] for r in t.rows()} == {None: "Done", "j3": "Not started", "pasted-1": "Not started"}
 
 
+def test_tailoring_puts_a_job_in_progress_as_it_starts(tmp_path):
+    t, fake, notion = make(tmp_path, [notion_row("p1", URL, status="Not started"),
+                                      notion_row("p2", "https://x.example/jobs/2", status="Applied")])
+    t.sync()
+    assert t.start(entry(status="In progress"), job_id="j1") == "updated"
+    assert t.start(entry(url="https://x.example/jobs/2", status="In progress")) == "unchanged"   # later stages stay
+    t.sync()
+    assert status_in_notion(fake, "p1") == "In progress" and status_in_notion(fake, "p2") == "Applied"
+
+    # An untracked job is added here, and goes to Notion only with the run's own entry, body and all.
+    new = "https://x.example/jobs/3"
+    assert t.start(entry(url=new, status="In progress", notes=""), job_id="j3") == "created"
+    t.sync()
+    assert {r["job_id"]: r["status"] for r in t.rows()}["j3"] == "In progress"
+    assert not any(r.get("_create", {}).get("properties", {}).get("Job URL", {}).get("url") == new for r in fake.rows.values())
+    t.upsert(entry(url=new, status="In progress", notes="Scored 2026-10-06 · Tailored resume 9/10"), job_id="j3")
+    made = next(r["_create"] for r in fake.rows.values() if r.get("_create", {}).get("properties", {}).get("Job URL", {}).get("url") == new)
+    assert made["properties"]["Status"]["status"]["name"] == "In progress" and made["children"]
+    assert [r["job_id"] for r in t.rows()].count("j3") == 1
+
+
 @pytest.mark.parametrize("status", ["Denied", "Not Applying"])
 def test_denied_and_not_applying_are_kept(tmp_path, status):
     t, fake, notion = make(tmp_path, [notion_row("p1", URL, status="Applied")])

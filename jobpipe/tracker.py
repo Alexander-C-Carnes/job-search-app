@@ -197,6 +197,30 @@ class LocalTracker:
             self._bump(con)
         return action
 
+    def start(self, e: TrackerEntry, job_id: Optional[str] = None) -> str:
+        """A job whose résumé is being tailored shows In progress at once. A tracked row moves there from Not
+        started (a later stage stays); an untracked job is added here but not queued for Notion: the run tracks
+        it with its scores when it ends, and a page made now would keep this entry's thin body.
+        Returns "created", "updated" or "unchanged"."""
+        key = canonical_url(e.url)
+        with closing(self._db()) as con, con:
+            row = (con.execute("SELECT * FROM tracker WHERE job_id = ?", (job_id,)).fetchone() if job_id else None) \
+                or (con.execute("SELECT * FROM tracker WHERE url_key = ?", (key,)).fetchone() if key else None)
+            if row is None:
+                con.execute("INSERT INTO tracker(id, job_id, name, company, job_url, url_key, status, fit, notes, updated) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                            ("local-" + secrets.token_hex(8), job_id, f"{e.title} — {e.company}", e.company, e.url, key,
+                             "In progress", e.fit_score, e.notes, now_iso()))
+                action = "created"
+            elif row["status"] in ("", "Not started"):
+                con.execute("UPDATE tracker SET job_id = COALESCE(?, job_id), status = 'In progress', dirty_status = 1, "
+                            "updated = ? WHERE id = ?", (job_id, now_iso(), row["id"]))
+                action = "updated"
+            else:
+                return "unchanged"
+            self._bump(con)
+        return action
+
     def upsert(self, e: TrackerEntry, job_id: Optional[str] = None) -> tuple[str, str]:
         """track(), then send it to Notion now if Notion answers. Returns (action, Notion page URL or "")."""
         action = self.track(e, job_id)
