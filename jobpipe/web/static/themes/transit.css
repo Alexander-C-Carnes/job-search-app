@@ -152,6 +152,9 @@ html[data-theme="transit"] .stage .n { position: relative; z-index: 1; width: 40
   box-shadow: 0 0 0 2px var(--ink); display: grid; place-items: center; font: 700 16px/1 var(--display); color: var(--ink); letter-spacing: -.02em; }
 html[data-theme="transit"] .stage[data-kind="side"] .n { width: 28px; height: 28px; border-width: 4px; font-size: 13px; box-shadow: 0 0 0 1.5px var(--ink); }
 html[data-theme="transit"] .stage[data-stage="Blocked"] .n { border-style: dashed; }
+/* the total rides on the station's edge as a small tag, so the circle keeps its number */
+html[data-theme="transit"] .stage .n .of { position: absolute; top: -9px; left: calc(100% - 10px); z-index: 2; padding: 0 4px; border: 1.5px solid var(--ink);
+  border-radius: 999px; background: var(--panel); color: var(--ink); font: 700 10px/13px var(--display); opacity: 1; white-space: nowrap; }
 html[data-theme="transit"] .stage .l { position: relative; z-index: 1; font: 600 14px/1.1 var(--display); color: var(--ink); max-width: 100%; }
 html[data-theme="transit"] .stage[data-kind="side"] .l { font-size: 13px; }
 html[data-theme="transit"] .stage[aria-pressed="true"] { background: none; }

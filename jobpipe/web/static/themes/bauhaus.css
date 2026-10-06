@@ -136,6 +136,7 @@ html[data-theme="bauhaus"] .stage .n { font: 400 56px/.9 var(--display); letter-
 html[data-theme="bauhaus"] .stage .l { font-size: 12px; font-weight: 700; color: var(--black); max-width: 100%; }
 html[data-theme="bauhaus"] .stage[data-kind="path"] .l { white-space: normal; overflow: visible; hyphens: auto; -webkit-hyphens: auto; line-height: 1.1; }
 html[data-theme="bauhaus"] .stage[data-kind="side"] .n { font-size: 30px; letter-spacing: -.02em; }
+html[data-theme="bauhaus"] .stage .n .of { font-size: .38em; opacity: .7; }
 html[data-theme="bauhaus"] .stage[data-kind="side"] .l { font-size: 11px; line-height: 1.1; white-space: normal; overflow: visible; }
 html[data-theme="bauhaus"] .stage[aria-pressed="true"] .n, html[data-theme="bauhaus"] .stage[aria-pressed="true"] .l { color: var(--black); }
 html[data-theme="bauhaus"] .stage-meter { display: none; }

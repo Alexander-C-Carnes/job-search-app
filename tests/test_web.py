@@ -103,6 +103,19 @@ def test_auth_and_host_guard(env):
     assert c.post(f"/api/impact-record/facts?t={TOKEN}", json={"text": "x"}).status_code == 401
 
 
+
+def test_remote_when_the_location_or_a_notion_rows_notes_say_so(env):
+    from jobpipe.web.board import says_remote
+    assert says_remote("Remote USA") and says_remote("All-remote R&D PMO") and says_remote("Atlanta; Remote - Washington, DC")
+    assert not any(map(says_remote, ["Seattle, WA (remote not stated)", "Remote/hybrid; NYC", "not remote", "Remote-friendly",
+                                      "New York, NY", "Remoteness"]))
+    env["store"].save_job(make_job("j7", remote=False, location="Remote USA"), "tpm-remote")   # flagged on-site, but its location says
+    env["store"].save_job(make_job("j8", remote=False, location="Remote, hybrid 2 days"), "tpm-remote")
+    by_id = {j["id"]: j for j in env["client"].get("/api/jobs", headers=H).json()["jobs"]}
+    assert (by_id["j7"]["remote"], by_id["j7"]["mode"]) == (True, "Remote")
+    assert not by_id["j8"]["remote"]
+
+
 def test_job_board_merges_local_jobs_and_notion(env):
     jobs = env["client"].get("/api/jobs", headers=H).json()["jobs"]
     by_id = {j["id"]: j for j in jobs}

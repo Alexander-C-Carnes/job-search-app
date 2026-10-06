@@ -143,6 +143,7 @@ html[data-theme="arcade"] .stage .n, html[data-theme="arcade"] .stage .l { posit
 html[data-theme="arcade"] .stage .n { order: 2; font: 400 13px/1 var(--pixel); margin-left: auto; flex: none; }
 html[data-theme="arcade"] .stage .l { order: 1; font-size: 14px; font-weight: 500; }
 html[data-theme="arcade"] .stage[data-kind="side"] .n { order: 1; margin-left: 0; font-size: 12px; }
+html[data-theme="arcade"] .stage .n .of { font: 400 8px var(--pixel); opacity: .8; }
 html[data-theme="arcade"] .stage[data-kind="side"] .l { order: 2; font-size: 12px; line-height: 1.1; }
 html[data-theme="arcade"] .stage:hover { background: var(--c); filter: brightness(1.06); }
 html[data-theme="arcade"] .stage[aria-pressed="true"] { background: var(--c); box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 7px var(--ink); }

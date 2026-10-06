@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -209,12 +210,12 @@ class JobBoard:
             job = json.loads(path.read_text())
         except (OSError, ValueError):
             return None
-        # Fully remote: the listing says remote and doesn't also say hybrid.
+        # Fully remote: the listing says remote and doesn't also say hybrid, or its location does ("Remote USA").
         remote = (bool(job.get("remote")) and not job.get("hybrid")
-                  and (job.get("work_arrangement") or "remote").lower() == "remote")
+                  and (job.get("work_arrangement") or "remote").lower() == "remote") or says_remote(job.get("location") or "")
         mode = work_mode(job)
         slim = {"title": job.get("job_title") or "", "company": job.get("company") or "",
-                "location": job.get("location") or "", "mode": "Hybrid" if mode == "Remote" and not remote else mode,
+                "location": job.get("location") or "", "mode": "Remote" if remote else "Hybrid" if mode == "Remote" else mode,
                 "remote": remote, "pay": salary_text(job),
                 "url": posting_url(job), "posted": job.get("date_posted") or "",
                 "company_domain": job.get("company_domain") or "", "funding": job.get("funding")}
@@ -259,8 +260,9 @@ class JobBoard:
             if r["company"] and title.endswith(f" — {r['company']}"):
                 title = title[: -len(r["company"]) - 3]
             jid = "notion-" + r["page_id"]
-            out.append({"id": jid, "title": title, "company": r["company"], "location": "", "mode": "",
-                        "remote": False, "pay": "", "funding": self._funding({"company": r["company"]}),
+            remote = says_remote(r["notes"] or "")   # a row made in Notion has no location; its notes often say
+            out.append({"id": jid, "title": title, "company": r["company"], "location": "", "mode": "Remote" if remote else "",
+                        "remote": remote, "pay": "", "funding": self._funding({"company": r["company"]}),
                         "url": r["job_url"], "fit": r["fit"], "one_line": r["notes"], "searches": [],
                         "tailored": False, "impact_score": None, "resume_score": None, "ats_total": None,
                         "posted": "", "first_seen": "", **_tracker_fields(r),
@@ -347,6 +349,16 @@ class JobBoard:
             flags = f"{int(tail['notion'])}{int(tail['syncing'])}{int(bool(tail['notion_error']))}{tail['pending']}"
             return (b'{"jobs":' + self._json + b"," + json.dumps(tail).encode()[1:],
                     f'"{self._hash}-{flags}"')
+
+
+_REMOTE = re.compile(r"\bremote\b", re.I)
+_NOT_REMOTE = re.compile(r"\bhybrid\b|\b(?:not|no|non)[\s-]+remote\b|\bremote[\s-]+(?:optional|friendly|possible|not)\b", re.I)
+
+
+def says_remote(text: str) -> bool:
+    """A location or note that says the role is remote ("Remote USA", "All-remote"), and not hybrid,
+    "not remote", "remote not stated" or only "remote-friendly"."""
+    return bool(_REMOTE.search(text)) and not _NOT_REMOTE.search(text)
 
 
 def _tracker_fields(n: Optional[dict]) -> dict:

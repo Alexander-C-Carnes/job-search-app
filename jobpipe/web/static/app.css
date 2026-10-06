@@ -200,6 +200,8 @@ label.inline input { width: 56px; margin: 0; }
 .stage:first-child { border-top-left-radius: 9px; }
 .stage:hover { background: var(--panel-2); }
 .stage .n { font: 600 17px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+/* with a search or chip on, a count shows its stage's total too: 1/10 (app.js ofAll) */
+.stage .n .of, .seg b .of { font-size: .62em; font-weight: 600; opacity: .75; margin-left: 1px; letter-spacing: 0; }
 .stage .l { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stage[aria-pressed="true"] { background: color-mix(in srgb, var(--c) 13%, var(--panel)); }
 .stage[aria-pressed="true"] .n, .stage[aria-pressed="true"] .l { color: var(--c); }

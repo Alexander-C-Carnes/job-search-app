@@ -458,20 +458,30 @@ function renderCounts() {
   $("#count-find").textContent = found || "";
 }
 function renderFindFilters() {
-  $("#find-seg").replaceChildren(...FIND_FILTERS.map(([k, label, test]) => h("button", {
-    class: S.findFilter === k ? "active" : "", onclick: () => { S.findFilter = k; renderJobs(); } },
-    label, " ", h("b", {}, S.jobs.filter((j) => matches(j, { stages: false }) && test(j)).length))));
+  $("#find-seg").replaceChildren(...FIND_FILTERS.map(([k, label, test]) => {
+    const n = S.jobs.filter((j) => matches(j, { stages: false }) && test(j)).length;
+    return h("button", { class: S.findFilter === k ? "active" : "", onclick: () => { S.findFilter = k; renderJobs(); } },
+      label, " ", h("b", {}, n, ofAll(n, S.jobs.filter((j) => SCOPES.find.has(j) && test(j)).length)));
+  }));
 }
 
+// With a search or a chip on, the stage counts are of the roles showing; this says so: "1/10", 1 of 10 in all.
+const narrowedBy = () => [...[...S.flags].map((f) => FLAG_NAMES[f]), ...(S.query.trim() ? [`“${S.query.trim()}”`] : [])];
+const ofAll = (n, total) => (narrowedBy().length && n !== total ? h("small", { class: "of" }, `/${total}`) : null);
 function renderStages() {
   const counts = Object.fromEntries(STAGES.map((s) => [s, 0]));
-  for (const j of S.jobs) if (matches(j, { stages: false })) counts[stageOf(j)]++;
+  const totals = Object.fromEntries(STAGES.map((s) => [s, 0]));
+  for (const j of S.jobs) {
+    if (matches(j, { stages: false })) counts[stageOf(j)]++;
+    if (SCOPES[S.scope].has(j)) totals[stageOf(j)]++;
+  }
+  const by = narrowedBy().join(", ");
   $("#stages").replaceChildren(...STAGES.map((s) => {
     const b = h("button", {
       class: "stage", "data-stage": s, "data-kind": PATH.includes(s) ? "path" : "side", "aria-pressed": String(S.stages.has(s)),
-      title: `${STAGE_BLURB[s]}. Click to show only these roles.`,
+      title: (by && counts[s] !== totals[s] ? `${counts[s]} of your ${totals[s]} ${s} roles match ${by}. ` : "") + `${STAGE_BLURB[s]}. Click to show only these roles.`,
       onclick: () => { S.stages.has(s) ? S.stages.delete(s) : S.stages.add(s); renderJobs(); } },
-      h("span", { class: "n" }, counts[s]), h("span", { class: "l" }, s));
+      h("span", { class: "n" }, counts[s], ofAll(counts[s], totals[s])), h("span", { class: "l" }, s));
     b.style.setProperty("--n", counts[s]);      // a look can size the main line's stages by their count
     return b;
   }));

@@ -123,6 +123,7 @@ html[data-theme="sorbet"] .stage[data-kind="side"] { flex: 0 0 auto; height: 54p
 html[data-theme="sorbet"] .stage:hover { background: var(--c); transform: translateY(-2px); z-index: 9; }
 html[data-theme="sorbet"] .stage[aria-pressed="true"] { background: var(--c); box-shadow: 0 0 0 3px var(--paper), 0 0 0 6px var(--accent); z-index: 9; }
 html[data-theme="sorbet"] .stage .n { font: 700 26px/1 var(--display); color: inherit; }
+html[data-theme="sorbet"] .stage .n .of { font: 700 13px var(--display); opacity: .8; }
 html[data-theme="sorbet"] .stage .l { font-size: 12px; font-weight: 700; color: inherit; opacity: .9; }
 html[data-theme="sorbet"] .stage[data-kind="side"] .n { font-size: 20px; }
 html[data-theme="sorbet"] .stage[data-kind="side"] .l { font-size: 11px; }
