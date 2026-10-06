@@ -256,6 +256,28 @@ label.inline input { width: 56px; margin: 0; }
 .fit.big { width: 46px; height: 46px; border-radius: 10px; font-size: 19px; }
 .fit.huge { width: 84px; height: 84px; border-radius: 14px; font-size: 36px; display: flex; align-items: baseline; justify-content: center; padding-top: 18px; }
 .fit.huge small { font-size: 13px; font-weight: 600; opacity: .75; }
+/* A résumé being tailored: its fit badge is a ring that fills as the run goes, with the step and time left
+   under the title (app.js ringTile, runStep; progress.py estimates both). A look can show .tip, the arc's end. */
+.fit.run-ring { position: relative; }
+html[data-theme] .fit.run-ring { border: 0; box-shadow: none; background: var(--panel); color: var(--ink); }   /* over a look's "not scored" dress */
+.run-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+.run-ring .trk { fill: none; stroke: var(--line); stroke-width: 3.5; }
+.run-ring .arc { fill: none; stroke: var(--link); stroke-width: 3.5; stroke-linecap: round; transition: stroke-dasharray 1s linear; }
+.run-ring .tip { display: none; fill: var(--link); transform-origin: 20px 20px; transition: transform 1s linear; }
+.run-ring .ring-t { position: relative; font-size: 11px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }   /* not the look's big score size */
+.run-ring.big .ring-t { font-size: 13px; }
+.run-step { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 1px 0; font-size: 12px; color: var(--muted); }
+.run-step .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--link); flex: none; animation: run-breathe 1.6s ease-in-out infinite; }
+.run-step b { color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.run-step .eta { color: var(--link); white-space: nowrap; }
+.run-step .eta.slow { color: var(--warn); }
+@keyframes run-breathe { 50% { transform: scale(.6); opacity: .6; } }
+.fit.pop { animation: fit-pop .45s ease-out; }   /* a run just finished: the new score arrives */
+@keyframes fit-pop { from { transform: scale(.6); } }
+@media (prefers-reduced-motion: reduce) {
+  .run-ring .arc, .run-ring .tip { transition: none; }
+  .run-step .dot, .fit.pop { animation: none; }
+}
 .star { border: 0; background: none; padding: 5px; border-radius: 6px; color: var(--faint); align-self: start; display: inline-flex; align-items: center; gap: 6px; }
 .star .ico { width: 16px; height: 16px; }
 .star:hover { color: var(--star); background: color-mix(in srgb, var(--star) 12%, transparent); }
@@ -290,11 +312,11 @@ label.inline input { width: 56px; margin: 0; }
 .detail { flex: 1; min-width: 0; overflow: auto; display: flex; flex-direction: column; background: var(--paper); }
 .empty { margin: auto; color: var(--muted); padding: 24px; text-align: center; }
 .dhead { padding: 16px 20px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
-.dhead-top { display: flex; gap: 14px; align-items: flex-start; }
-.dhead-title { flex: 1; min-width: 0; }
+.dhead-top { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-start; }
+.dhead-title { flex: 1 1 300px; min-width: 0; }   /* narrower than this, the buttons move under the title */
 .dhead h2 { font-size: 20px; line-height: 1.2; letter-spacing: -.015em; font-weight: 650; }
 .dhead .sub { color: var(--muted); margin-top: 3px; }
-.dhead-actions { display: flex; gap: 8px; align-items: center; flex: none; }
+.dhead-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex: none; margin-left: auto; }
 .drawer-close { display: none; }
 .dhead .bar { display: flex; gap: 8px 14px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 .status-select { width: auto; font-weight: 600; color: var(--c); border-color: color-mix(in srgb, var(--c) 45%, var(--line)); background: color-mix(in srgb, var(--c) 8%, var(--panel)); }
@@ -683,6 +705,18 @@ dialog::backdrop { background: rgba(10, 12, 16, .36); }
 dialog h2 { font-size: 17px; letter-spacing: -.01em; margin-bottom: 12px; }
 dialog h2 + p { margin: -6px 0 12px; }
 #referral-dialog { width: min(480px, 92vw); }
+/* how long an action takes, on its button ("Make résumé ~25 min"), and the links to the glossary */
+.btn-time { font-weight: 400; font-size: .86em; opacity: .72; white-space: nowrap; }
+.help-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; white-space: nowrap; }
+/* What each does: one name, time and line for each action, search and score (app.js openActionsHelp) */
+#actions-help { width: min(620px, 94vw); max-height: 86vh; overflow: auto; }
+#actions-help .gl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+#actions-help h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 18px 0 6px; }
+#actions-help dl { margin: 0; display: grid; gap: 10px; }
+#actions-help dt { font-weight: 700; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+#actions-help .gl-meta { font-weight: 400; font-size: 12px; color: var(--muted); }
+#actions-help dd { margin: 2px 0 0; color: var(--ink); line-height: 1.45; }
+#actions-help p { line-height: 1.45; }
 
 @media (max-width: 1100px) {
   .tools-row { flex-wrap: wrap; }

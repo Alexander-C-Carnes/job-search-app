@@ -42,6 +42,7 @@ from . import linked, searches_file
 from .sent import SentResumes
 from .board import JobBoard, Marks, TrackerSync, clean_url
 from .resumes import EditError, ResumeWorkspace
+from .progress import Estimator
 from .runs import Busy, Run, RunManager
 from .scoring import Scorer
 
@@ -173,6 +174,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         store.root / "tracker.db", notion=tracker, seed=store.root / "notion-cache.json")
     sync = TrackerSync(local)
     runs = runs or RunManager(db=local.path)   # run history sits beside the tracker in data/tracker.db
+    progress = Estimator(runs)                 # how far along a tailoring run is, for the ring on its fit badge
     marks = Marks(store.root / "marks.json")
 
     def materials() -> tuple[str, int]:
@@ -312,8 +314,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
                             "period": cfg.allowance_period, "per_run": cfg.max_credits_per_run},
                 "backend": cfg.backend, "backend_label": BACKEND_LABELS.get(cfg.backend, cfg.backend),
                 "notion": local.notion is not None,
-                "statuses": list(STATUSES), "active_runs": [r.public(len(r.lines)) for r in runs.running()],
-                "scoring": scorer.public(), "startups": startups_summary()}
+                "statuses": list(STATUSES), "active_runs": [{**r.public(len(r.lines)), "progress": progress.of(r)} for r in runs.running()],
+                "scoring": scorer.public(), "startups": startups_summary(), "durations": progress.durations()}
 
     @app.get("/api/jobs")
     def jobs(request: Request, refresh: bool = False, wait: bool = False):
@@ -367,21 +369,21 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         if row["tailored"]:
             sc = {**st, **scores_from_run(st["run_dir"])}
             fit = sc.get("impact_score")
-            notes = (f"Scored {today} · Tailored resume {sc.get('resume_score') or '?'}/10 · "
+            notes = (f"Scored {today} · Résumé {sc.get('resume_score') or '?'}/10 · "
                      f"ATS {round(sc['ats_total']) if sc.get('ats_total') is not None else 'n/a'}% · {where}")
         else:
             # The full score where there is one (it replaces the signal score), else the signal score.
             fit = row["impact_score"] if row["impact_score"] is not None else tri.get("fit_score")
             fit = float(fit) if fit is not None else None
             notes = (f"Scored {today} · Full score {row['impact_score']}/10 · {where}" if row["impact_score"] is not None else
-                     f"Triaged {today} · Quick fit {tri.get('fit_score', '?')}/10 · {tri.get('one_line', '')} · {where}")
+                     f"Scored {today} · Signal score {tri.get('fit_score', '?')}/10 · {tri.get('one_line', '')} · {where}")
         body = [f"**Posting:** {row['url']}"]
         if row.get("funding"):
             body.append(f"**Funding:** {row['funding']['line']}" + (f" {row['funding']['url']}" if row["funding"].get("url") else ""))
         if row["impact_score"] is not None:
             body.append(f"**Full score:** {row['impact_score']}/10.")
         elif tri.get("one_line"):
-            body.append(f"**Quick fit:** {tri.get('fit_score')}/10. {tri['one_line']}")
+            body.append(f"**Signal score:** {tri.get('fit_score')}/10. {tri['one_line']}")
         if tri.get("strongest_matches"):
             body.append("**Strongest matches:** " + "; ".join(tri["strongest_matches"]))
         if tri.get("likely_gaps"):
@@ -542,8 +544,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         from ..tailor import Tailor, copy_analysis, run_script
         row, job, jd_md = await prepare(jid)
         if row["tailored"]:
-            raise HTTPException(400, "This job's tailoring run already scored every requirement. "
-                                     "Tailor it again to refresh that score.")
+            raise HTTPException(400, "Make résumé already scored every requirement for this job. "
+                                     "Make its résumé again to refresh that score.")
         meta = Candidate(job, "manual").meta
         out_dir = config.OUTPUTS / date.today().isoformat()
         run_dir = out_dir / "runs" / slug(meta.company, meta.title, jid)   # where a tailoring run will look
@@ -1019,14 +1021,15 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         # Searches spend credits and write the day's digest, so they take turns; so do two runs for one job.
         key, busy = "search", "A search is already going. Start this one when it finishes (or stop it in Runs)."
         if kind == "preflight":
-            args, label = ["preflight", *flags], "Preflight (≤1 credit per filter)"
+            args, label = ["preflight", *flags], "Check filters (≤1 credit each)"
         elif kind == "run":
             args = ["run", *flags]
             if body.get("no_tailor"):
                 args.append("--no-tailor")
             if body.get("top") not in (None, ""):
                 args += ["--top", str(int(body["top"]))]
-            label = "Search + triage" + ("" if body.get("no_tailor") else " + tailor")
+            label = "Search + signal score" if body.get("no_tailor") else (
+                "Search + make résumés" + (f" for top {int(body['top'])}" if body.get("top") not in (None, "") else ""))
         elif kind == "once":
             # Search once: a filter from the dialog, run as it is and not saved. It finds and stores jobs
             # (in Find jobs, "Found by one-off") and, unless score is false, signal-scores the new ones.
@@ -1039,18 +1042,18 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             score = body.get("score", True) is not False
             args = ["run", "--no-tailor", *flags] if score else ["search", *flags]
             what = ", ".join(spec["titles"])                 # what ran: the dialog may have changed a saved filter
-            label = f"Search once: {what if len(what) <= 70 else what[:67] + '…'}" + (" + score" if score else "")
+            label = f"Search once: {what if len(what) <= 70 else what[:67] + '…'}" + (" + signal score" if score else "")
         elif kind == "tailor":
             jid = str(body.get("job_id", ""))
             if not store.job(jid):
                 raise HTTPException(400, "Unknown job")
-            args, label = ["tailor", jid], f"Tailor {store.job(jid).get('job_title', jid)}"
-            key, busy = f"tailor:{jid}", "This job is already being tailored. Follow it in Runs."
+            args, label = ["tailor", jid], f"Make résumé: {store.job(jid).get('job_title', jid)}"
+            key, busy = f"tailor:{jid}", "This job's résumé is already being made. Follow it in Runs."
         elif kind == "tailor-pasted":
             # Stored first, like Add a job, so the run tailors that job and it shows in Find jobs.
             jid, _ = store_added({**body, "allow_duplicate": True})
             job = store.job(jid)
-            args, label = ["tailor", jid], f"Tailor {job['job_title']} @ {job['company']}"
+            args, label = ["tailor", jid], f"Make résumé: {job['job_title']} @ {job['company']}"
             key = f"tailor:{jid}"
         else:
             raise HTTPException(400, "Unknown run kind")
@@ -1093,7 +1096,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         if not refresh_due():
             return None
         try:
-            return runs.start("Startup search", ["startups", "refresh"], marks=marks_now(), key="startups")
+            return runs.start("Refresh startup sources", ["startups", "refresh"], marks=marks_now(), key="startups")
         except Busy:
             return None
 
@@ -1164,7 +1167,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     @app.post("/api/startups/refresh")
     def refresh_startups():
         try:
-            return runs.start("Startup search", ["startups", "refresh"], marks=marks_now(), key="startups",
+            return runs.start("Refresh startup sources", ["startups", "refresh"], marks=marks_now(), key="startups",
                               busy="The startup search is already going. Follow it in Runs.").public(0)
         except Busy as e:
             raise HTTPException(409, str(e)) from None
@@ -1509,7 +1512,7 @@ def serve(cfg: Config, port: int = 8765, open_browser: bool = True) -> None:
                 wait = 600.0
                 run = app.state.auto_refresh()
                 if run:
-                    print(f"  Startup search started on its own (run {run.id}); it runs every "
+                    print(f"  Refresh startup sources started on its own (run {run.id}); it runs every "
                           f"{cfg.startups.auto_refresh_hours:g} hours while the app is open.")
         threading.Thread(target=keep_fresh, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

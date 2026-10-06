@@ -82,7 +82,7 @@
             <button class="chip" data-flag="starred" aria-pressed="false"><span class="ico" data-icon="star"></span>Starred <b></b></button>
             <button class="chip" data-flag="referral" aria-pressed="false"><span class="ico" data-icon="person"></span>Has referral <b></b></button>
             <button class="chip" data-flag="remote" aria-pressed="false" title="Fully remote roles only (not hybrid)">Remote <b></b></button>
-            <button class="chip" data-flag="tailored" aria-pressed="false">Tailored <b></b></button>
+            <button class="chip" data-flag="tailored" aria-pressed="false" title="Roles with a résumé made for them">Has résumé <b></b></button>
             <button class="chip" data-flag="startup" aria-pressed="false" title="Roles at a startup whose funding round is known (see the Startups tab)">Startup <b></b></button>
           </div>
         </div>
@@ -175,10 +175,11 @@
         <div class="run-bar">
           <span id="run-summary"></span>
           <span class="grow"></span>
-          <button data-run="preflight" class="ghost" title="Checks each filter with a 1-job request (at most 1 credit each)">Preflight</button>
-          <button data-run="triage" class="ghost">Search + score</button>
-          <button data-run="full" class="primary">Search + score + tailor top</button>
-          <label class="inline"><span class="sr-only">How many to tailor</span><input id="run-top" type="number" min="0" max="10" value="3"></label>
+          <button type="button" class="link-btn help-link" data-help>What each does</button>
+          <button data-run="preflight" class="ghost" title="Asks JobsPipe how many jobs each filter matches, with a one-job request (at most 1 credit each). Nothing is stored or scored.">Check filters</button>
+          <button data-run="triage" class="ghost" title="Runs your filters, stores the new jobs in Find jobs and gives each a signal score (one Claude call per job)">Search + signal score</button>
+          <button data-run="full" class="primary" title="The same, then Make résumé for the best new jobs with a signal score of 7 or more (about 25 minutes each)">Search + make résumés for top</button>
+          <label class="inline"><span class="sr-only">How many résumés to make</span><input id="run-top" type="number" min="0" max="10" value="3"></label>
         </div>
       </div>
     </section>
@@ -216,7 +217,7 @@
         <div class="doc-head">
           <div class="doc-title">
             <h1>Impact record</h1>
-            <p class="muted">Every score and résumé is built from this. Changes save as you type, and the next score, tailoring run or résumé edit uses them.</p>
+            <p class="muted">Every score and résumé is built from this. Changes save as you type, and every score, Make résumé and résumé edit after that uses them.</p>
           </div>
           <span id="impact-state" class="save-state" role="status"></span>
           <div class="seg" id="impact-view" role="group" aria-label="View">
@@ -337,7 +338,7 @@
             </div>
           </section>
           <details class="pcard">
-            <summary>How the quick score describes your evidence</summary>
+            <summary>How the signal score describes your evidence</summary>
             <label>Describe your materials <span class="hint">e.g. point at a section of your impact record worth reading in full</span>
               <textarea name="evidence" rows="2"></textarea></label>
           </details>
@@ -410,8 +411,9 @@
       <div class="actions">
         <button type="button" data-act="cancel" class="ghost">Cancel</button>
         <span class="grow"></span>
-        <button value="score" class="ghost" title="Adds it to Find jobs, then one quick Claude call: how well your impact record fits this posting">Add and score</button>
-        <button value="tailor" class="primary" title="Adds it, then the full run: score, three drafts, merged résumé, PDF and report">Tailor résumé</button>
+        <button type="button" class="link-btn help-link" data-help>What each does</button>
+        <button value="score" class="ghost" title="Adds it to Find jobs, then a signal score: one quick Claude call on how well your impact record fits the posting">Add + signal score</button>
+        <button value="tailor" class="primary" title="Adds it, then Make résumé: the full score, three drafts, the best merged and checked, a PDF and a fit report (about 25 minutes)">Add + make résumé</button>
       </div>
     </form>
   </dialog>
@@ -489,8 +491,8 @@
       <div class="actions">
         <button type="button" data-act="cancel" class="ghost">Cancel</button>
         <span class="grow"></span>
-        <label class="check once-score" title="One quick Claude call per new job. Untick to only fetch the jobs (no Claude calls).">
-          <input type="checkbox" name="once_score" checked> Score what it finds</label>
+        <label class="check once-score" title="A signal score for each new job: one quick Claude call each. Untick to only fetch the jobs (no Claude calls).">
+          <input type="checkbox" name="once_score" checked> Signal score what it finds</label>
         <button type="button" data-act="once" class="ghost" title="Run this filter now, as it is, without saving it">Search once</button>
         <button class="primary">Save filter</button>
       </div>

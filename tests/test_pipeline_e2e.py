@@ -77,7 +77,7 @@ def test_full_run(tmp_dirs):
                r["_create"]["properties"] for r in notion.rows.values() if "_create" in r}
     assert created[f"{TITLE} — Acme"]["Status"]["status"]["name"] == "In progress"
     assert created[f"{TITLE} — Acme"]["Fit Score"]["number"] == 9.0      # impact-record score
-    assert "Tailored resume 9.0/10" in created[f"{TITLE} — Acme"]["Notes"]["rich_text"][0]["text"]["content"]
+    assert "Résumé 9.0/10" in created[f"{TITLE} — Acme"]["Notes"]["rich_text"][0]["text"]["content"]
     assert created[f"{TITLE} — Beta"]["Status"]["status"]["name"] == "Not started"
     assert not any("Gamma" in n for n in created)
 

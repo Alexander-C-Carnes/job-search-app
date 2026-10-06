@@ -417,7 +417,7 @@ def test_scored_startup_roles_go_to_the_tracker(tmp_dirs):
                                        runner=FakeRunner({"startup-x-role-2": 6})))
     rows = {r["job_id"]: r for r in tracker.rows()}
     assert set(rows) == {"startup-x-role-1"} and rows["startup-x-role-1"]["status"] == "Not started"
-    assert rows["startup-x-role-1"]["fit"] == 8 and "Quick fit 8/10" in rows["startup-x-role-1"]["notes"]
+    assert rows["startup-x-role-1"]["fit"] == 8 and "Signal score 8/10" in rows["startup-x-role-1"]["notes"]
     # the backfill adds the one scored before the floor was set, once; dismissed and lower ones stay out
     jobs.save_job({"id": "startup-y-gone-1", "job_title": "Gone", "company": "Y", "url": "https://y/1"}, "startups")
     jobs.update("startup-y-gone-1", triage={"fit_score": 9}, dismissed=True)

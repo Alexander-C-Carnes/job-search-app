@@ -74,10 +74,10 @@ def notes_line(c: Candidate, today: str) -> str:
     if c.tailored:
         t, card = c.tailored, c.tailored.final_card
         pct = lambda v: "n/a" if v is None else f"{v:.0f}%"
-        return (f"Scored {today} · Tailored resume {t.resume_score or '?'}/10 · ATS {pct(card['total'])} "
+        return (f"Scored {today} · Résumé {t.resume_score or '?'}/10 · ATS {pct(card['total'])} "
                 f"(Skills {pct(card['skills'])} / Experience {pct(card['experience'])} / "
                 f"Keywords {pct(card['keywords'])}) · {where}")
-    return f"Triaged {today} · Quick fit {c.triage.fit_score}/10 · {c.triage.one_line} · {where}"
+    return f"Scored {today} · Signal score {c.triage.fit_score}/10 · {c.triage.one_line} · {where}"
 
 
 def tracker_entry(c: Candidate, today: str) -> TrackerEntry:
@@ -85,7 +85,7 @@ def tracker_entry(c: Candidate, today: str) -> TrackerEntry:
     if c.tailored:
         t = c.tailored
         body = [f"**Posting:** {m.url}", t.notion_summary,
-                f"**Fit:** Impact record {t.impact_score or '?'}/10 · Tailored resume {t.resume_score or '?'}/10 · "
+                f"**Scores:** Full score {t.impact_score or '?'}/10 · Résumé {t.resume_score or '?'}/10 · "
                 f"ATS {t.final_card['total'] or 0:.0f}%",
                 f"**Resume:** {t.pdf.name if t.pdf else '(PDF not rendered)'}"]
         if t.unconfirmed_gaps:
@@ -95,7 +95,7 @@ def tracker_entry(c: Candidate, today: str) -> TrackerEntry:
         return TrackerEntry(title=t.exact_title, company=m.company, url=m.url, fit_score=t.impact_score,
                             notes=notes_line(c, today), status="In progress", body=body)
     tr = c.triage
-    body = [f"**Posting:** {m.url}", f"**Quick fit:** {tr.fit_score}/10. {tr.one_line}"]
+    body = [f"**Posting:** {m.url}", f"**Signal score:** {tr.fit_score}/10. {tr.one_line}"]
     if funding_line(c.job.get("funding")):
         body.append(f"**Funding:** {funding_line(c.job['funding'])}")
     if tr.strongest_matches:

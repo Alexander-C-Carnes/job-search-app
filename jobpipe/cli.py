@@ -1,10 +1,10 @@
 """Command line: python -m jobpipe <command> ...
 
-  preflight            Count matches for each saved search (at most 1 credit per search)
+  preflight            Check filters: count matches for each saved search (at most 1 credit per search)
   search               Fetch jobs (saved searches, or an ad-hoc query from flags); no Claude calls
-  run                  search -> triage -> tailor the best -> Notion -> digest
-  tailor JOB_ID        Full resume-job-fit run for one stored job (or --jd-file for a pasted posting)
-  jobs                 List stored jobs and their triage scores
+  run                  search -> signal score -> make résumés for the best -> Notion -> digest
+  tailor JOB_ID        Make résumé for one stored job (or --jd-file for a pasted posting)
+  jobs                 List stored jobs and their signal scores
   startups refresh     Read the funding feeds, the YC directory and VC boards into data/startups.json, then the
                        startups' careers boards: roles matching your filters land in Find jobs (free)
   startups scan        Just the careers boards (--limit N startups, newest raise first)
@@ -143,7 +143,7 @@ def cmd_tailor(cfg, args):
     c = asyncio.run(p.tailor_job(job))
     _usage(p.runner)
     if not c.tailored:   # a failed run must not look done (the web app's Runs tab goes by the exit status)
-        sys.exit(f"\nTailoring didn't finish: {c.error or 'no résumé was produced'}")
+        sys.exit(f"\nMake résumé didn't finish: {c.error or 'no résumé was produced'}")
     t = c.tailored
     print(f"\nPDF: {t.pdf}\nReport: {t.report}\nHeat map: {t.heatmap}\nRun folder: {t.run_dir}")
 
@@ -298,11 +298,11 @@ def main(argv=None) -> None:
 
     p = sub.add_parser("run")
     _add_query_flags(p)
-    p.add_argument("--top", type=int, help="how many to tailor (default: pipeline.tailor_top)")
-    p.add_argument("--no-tailor", action="store_true", help="triage only")
+    p.add_argument("--top", type=int, help="how many résumés to make (default: pipeline.tailor_top)")
+    p.add_argument("--no-tailor", action="store_true", help="signal score only, no résumés")
     p.add_argument("--no-notion", action="store_true")
     p.add_argument("--no-fetch", action="store_true", help="don't fetch employer pages for short listings")
-    p.add_argument("--retriage", action="store_true", help="re-score jobs triaged on earlier runs")
+    p.add_argument("--retriage", action="store_true", help="signal score again the jobs scored on earlier runs")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("tailor")

@@ -55,6 +55,7 @@ const ICONS = {
   star: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.4l2.35 4.76 5.25.77-3.8 3.7.9 5.23L10 14.39l-4.7 2.47.9-5.23-3.8-3.7 5.25-.77z"/></svg>',
   person: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.1"/><path d="M3.8 16.8c.7-3 3.2-4.6 6.2-4.6s5.5 1.6 6.2 4.6"/></svg>',
   close: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg>',
+  info: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2"/><path d="M10 9v5M10 6.2v.1"/></svg>',
   up: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 12.5L10 8l4.5 4.5"/></svg>',
   down: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 7.5L10 12l4.5-4.5"/></svg>',
   left: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5.5L8 10l4.5 4.5"/></svg>',
@@ -97,7 +98,7 @@ const APPLIED_STAGES = ["Applied", "Interviewing", "Offer", "Denied", "Done"];
 // The main line, in order, and the exits off it: how the stage strip and a role's stage path draw them.
 const PATH = ["Not started", "In progress", "Applied", "Interviewing", "Offer", "Done"];
 const EXITS = ["Blocked", "Denied", "Not Applying"];
-const STAGE_BLURB = { "Not started": "Tracked, nothing done yet", "In progress": "Scoring or tailoring the résumé", Blocked: "Waiting on something",
+const STAGE_BLURB = { "Not started": "Tracked, nothing done yet", "In progress": "Having its résumé made, or you're working on it", Blocked: "Waiting on something",
                       Applied: "Application sent", Interviewing: "In interviews",
                       Offer: "They made an offer", Denied: "They said no", Done: "Interviews finished or closed out", "Not Applying": "Ruled out" };
 // The two job lists: what's in the tracker, and what the searches found that isn't tracked yet.
@@ -149,7 +150,118 @@ function showTab(name) {
   if (name === "profile") { loadProfile(); loadAI(); }
 }
 
+// ---- what each action is called ----------------------------------------------------------------
+// One name per thing the app can do to a job, used on every button, tooltip, run and in the glossary
+// (What each does). Times come from your own runs (progress.py) once there are some.
+const ACTIONS = {
+  signal: { name: "Signal score", calls: "one Claude call",
+    what: "A quick read on fit: scores the posting against your impact record from 1 to 10, with the strongest matches, the hard requirements to check and the likely gaps. Use it to pick which roles are worth more." },
+  full: { name: "Full score", calls: "about four Claude calls",
+    what: "Rates every requirement in the posting against your impact record and each of your résumés: a 1 to 10 score, a heat map and the gaps to confirm. No résumé is written. Make résumé reuses it." },
+  resume: { name: "Make résumé", calls: "about eleven Claude calls",
+    what: "Writes a résumé for this posting: the full score (reused if it has one), three drafts, the best of them merged and checked, a PDF and a fit report. The job moves to In progress, and its badge fills as it goes." },
+};
+const mins = (sec) => `~${Math.max(1, Math.round(sec / 60))} min`;
+function actionTime(kind) {
+  const d = S.summary?.durations;
+  if (kind === "signal") return "~30 sec";
+  if (kind === "full") return d ? mins(d.full_score_s) : "a few min";
+  return d ? mins(d.make_resume_s) : "~25 min";
+}
+const timeTag = (kind) => h("span", { class: "btn-time" }, actionTime(kind));
+const makeResumeButton = (j, cls = "primary", label = ACTIONS.resume.name) => h("button", { class: cls, title: ACTIONS.resume.what,
+  onclick: () => startRun({ kind: "tailor", job_id: j.id }) }, label, timeTag("resume"));
+const helpLink = (label = "What each does") => h("button", { class: "link-btn help-link", type: "button", onclick: openActionsHelp }, icon("info"), label);
+// The glossary: what each action does, how long it takes, and what the scores mean.
+function openActionsHelp() {
+  const row = (name, meta, what) => h("div", { class: "gl-row" }, h("dt", {}, name, meta && h("span", { class: "gl-meta" }, meta)), h("dd", {}, what));
+  const dlg = $("#actions-help") || document.body.appendChild(h("dialog", { id: "actions-help", "aria-labelledby": "actions-help-title" }));
+  dlg.replaceChildren(
+    h("div", { class: "gl-head" }, h("h2", { id: "actions-help-title" }, "What each does"),
+      h("button", { class: "icon-btn", title: "Close", "aria-label": "Close", onclick: () => dlg.close() }, icon("close"))),
+    h("h3", {}, "On a job"),
+    h("dl", {}, ...["signal", "full", "resume"].map((k) => row(ACTIONS[k].name, `${actionTime(k)} · ${ACTIONS[k].calls}`, ACTIONS[k].what))),
+    h("p", { class: "muted" }, "Most roles only need a signal score. Run a full score on the ones worth a closer look, and make a résumé for the ones you'll apply to."),
+    h("h3", {}, "Searches (Filters tab)"),
+    h("dl", {},
+      row("Check filters", "≤1 credit per filter", "Asks JobsPipe how many jobs each filter matches, with a one-job request. Nothing is stored or scored."),
+      row("Search + signal score", "credits, then one call per new job", "Runs your filters, stores the new jobs in Find jobs and gives each a signal score."),
+      row("Search + make résumés for top N", "as above, then Make résumé N times", `The same, then Make résumé for the N best new jobs with a signal score of 7 or more.`),
+      row("Search once", "credits", "In the New/Edit filter dialog: runs what's in the dialog without saving it.")),
+    h("h3", {}, "Scores"),
+    h("dl", {},
+      row("Signal score", "1–10", "How well your impact record fits the posting, from one quick read."),
+      row("Full score", "1–10", "The same question, answered requirement by requirement. It replaces the signal score once a job has one."),
+      row("Résumé", "1–10", "How well the résumé you made covers the posting. Every edit is rated again."),
+      row("ATS", "%", "How much of the posting's skills, experience and keywords an applicant tracking system would find in the résumé.")),
+    h("h3", {}, "Runs"),
+    h("p", {}, "The Runs tab lists searches and Make résumé, with each one's log. A signal or full score shows on the job instead."),
+    h("div", { class: "actions" }, h("button", { class: "primary", onclick: () => dlg.close() }, "Close")));
+  dlg.showModal();
+}
+const isStartupRefresh = (r) => r.args?.[0] === "startups";
+$$("[data-help]").forEach((b) => { b.prepend(icon("info")); b.addEventListener("click", openActionsHelp); });   // in index.html
+
 // ---- summary ------------------------------------------------------------------------------
+// Résumé tailoring runs' progress, by job (progress.py estimates it): their fit badges become rings that fill
+// (ringTile), with the step and time left under the title, moved on every second between polls by tickRuns.
+const RUNP = { jobs: new Map(), done: new Set(), timer: null };
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+function trackRunProgress(going) {
+  const was = RUNP.jobs;
+  RUNP.jobs = new Map(going.filter((r) => r.progress).map((r) => [r.progress.job, { ...r.progress, got: Date.now() }]));
+  const changed = [...new Set([...was.keys(), ...RUNP.jobs.keys()])].filter((id) => was.has(id) !== RUNP.jobs.has(id));
+  for (const id of changed) {
+    if (!RUNP.jobs.has(id)) { RUNP.done.add(id); setTimeout(() => RUNP.done.delete(id), 4000); }   // finished: its badge springs back
+    const j = S.byId.get(id);
+    if (!j) continue;
+    j._el = j._card = null;
+    $$(`#job-detail .fit[data-job="${CSS.escape(id)}"]`).forEach((el) => el.replaceWith(fitTile(j, el.dataset.cls)));
+  }
+  if (changed.length) renderJobs();
+  clearInterval(RUNP.timer);
+  if (RUNP.jobs.size) { tickRuns(); RUNP.timer = setInterval(tickRuns, 1000); }
+}
+function runNow(p) {   // the share done and seconds left now, moved on from the last poll but never past the step's end
+  const dt = (Date.now() - p.got) / 1000;
+  return { f: Math.min(p.fraction + dt / p.total_s, p.cap), left: Math.max(p.eta_s - dt, p.eta_min_s) };
+}
+const timeLeft = (s) => (s < 60 ? "under a minute" : `~${Math.round(s / 60)} min`);
+function paintRing(el) {
+  const p = RUNP.jobs.get(el.dataset.job);
+  if (!p) return;
+  const { f, left } = runNow(p);
+  $(".arc", el).setAttribute("stroke-dasharray", `${(f * 100).toFixed(2)} 100`);
+  $(".tip", el).style.transform = `rotate(${(f * 360).toFixed(1)}deg)`;
+  // the percent, and every few seconds the minutes left
+  $(".ring-t", el).textContent = !reducedMotion() && Math.floor(Date.now() / 3200) % 2 ? (left < 60 ? "<1m" : `${Math.round(left / 60)}m`) : `${Math.round(f * 100)}%`;
+  el.setAttribute("aria-valuenow", String(Math.round(f * 100)));
+  el.title = `Making the résumé: ${p.step} (step ${p.n} of ${p.of}). About ${timeLeft(left)} left.`;
+}
+function paintRunStep(el) {
+  const p = RUNP.jobs.get(el.dataset.job);
+  if (!p) return;
+  const { left } = runNow(p);
+  el.replaceChildren(h("span", { class: "dot", "aria-hidden": "true" }), h("b", {}, p.step),
+    h("span", { class: "eta" + (p.slow ? " slow" : ""), title: p.slow ? "This step is taking longer than usual" : null }, `· ${timeLeft(left)} left`));
+}
+function tickRuns() {
+  $$(".run-ring[data-job]").forEach(paintRing);
+  $$(".run-step[data-job]").forEach(paintRunStep);
+  const eta = $("#run-indicator .run-eta");
+  if (eta) { const p = RUNP.jobs.get(eta.dataset.job); if (p) eta.textContent = ` · ${timeLeft(runNow(p).left)} left`; }
+}
+const ringTile = (j, cls) => {
+  const el = h("div", { class: `fit run-ring ${cls}`, "data-job": j.id, "data-cls": cls, role: "progressbar", "aria-label": "Make résumé progress",
+    "aria-valuemin": "0", "aria-valuemax": "100",
+    html: '<svg viewBox="0 0 40 40" aria-hidden="true"><circle class="trk" cx="20" cy="20" r="16.5"/>'
+      + '<circle class="arc" cx="20" cy="20" r="16.5" pathLength="100" stroke-dasharray="0 100"/>'
+      + '<g class="tip"><circle cx="36.5" cy="20" r="3.2"/></g></svg><span class="ring-t"></span>' });
+  paintRing(el);
+  return el;
+};
+const runStep = (j) => RUNP.jobs.has(j.id) && (() => { const el = h("div", { class: "run-step", "data-job": j.id }); paintRunStep(el); return el; })();
+
 async function loadSummary() {
   const was = S.summary?.active_runs || [];
   try {
@@ -165,9 +277,11 @@ async function loadSummary() {
   $("#backend").textContent = "AI: " + (S.summary.backend_label || S.summary.backend);
   const ind = $("#run-indicator");
   const going = S.summary.active_runs;
+  trackRunProgress(going);
   ind.classList.toggle("hidden", !going.length);
   if (going.length) {
-    ind.replaceChildren(spinner(), " ", going.length === 1 ? going[0].label : `${going.length} runs`);
+    ind.replaceChildren(spinner(), " ", going.length === 1 ? going[0].label : `${going.length} runs`,
+      ...(going.length === 1 && going[0].progress ? [h("span", { class: "run-eta", "data-job": going[0].progress.job })] : []));
     ind.title = going.map((r) => r.label).join("\n");
     ind.onclick = () => { showTab("runs"); selectRun(going[0].id); };
   }
@@ -177,7 +291,7 @@ async function loadSummary() {
   if (ended.length && S.tab === "runs") loadRuns();
   $("#count-startups").textContent = S.summary.startups?.recent || "";
   renderStartupState();
-  if (ended.some((r) => r.label === "Startup search")) loadStartups({ quiet: true });
+  if (ended.some(isStartupRefresh)) loadStartups({ quiet: true });
   if (ended.some((r) => S.runId !== r.id)) { S.details.clear(); loadJobs({ refresh: true }); }
 }
 
@@ -400,7 +514,7 @@ function setView(view) {
 // Three parts fold on their own so the selected role, and above all its résumé and the chat, get the room:
 // the filters to one strip, the list to a rail of scores, the role's header to one line.
 const FOLDS = ["filters", "list", "head"];
-const FLAG_NAMES = { starred: "Starred", referral: "Has referral", remote: "Remote", tailored: "Tailored", startup: "Startup" };
+const FLAG_NAMES = { starred: "Starred", referral: "Has referral", remote: "Remote", tailored: "Has résumé", startup: "Startup" };
 const allFolded = () => FOLDS.every((k) => S.fold[k]);
 function applyFolds() {
   const tab = $("#tab-jobs");
@@ -724,15 +838,15 @@ function renderBatch() {
     parts.push(h("span", {}, h("b", {}, picked.length), " selected"),
       ...(S.scope === "find" ? [h("button", { class: "primary small", title: "Adds them to your tracker as Not started. You stay here.",
         onclick: () => trackJobs(picked.map((j) => j.id)) }, "Track")] : []),
-      h("button", { class: "ghost small", disabled: !sig.length, title: "One quick Claude call per job (skips roles with a full score)",
+      h("button", { class: "ghost small", disabled: !sig.length, title: `${ACTIONS.signal.what} ${actionTime("signal")} each; roles with a full score are skipped.`,
         onclick: () => scoreJobs(sig.map((j) => j.id), "signal") }, "Signal score"),
-      h("button", { class: "ghost small", disabled: !full.length, title: "Rates every requirement: about four Claude calls and a few minutes per job",
+      h("button", { class: "ghost small", disabled: !full.length, title: `${ACTIONS.full.what} ${actionTime("full")} each, one at a time.`,
         onclick: () => scoreJobs(full.map((j) => j.id), "full") }, "Full score"),
       h("button", { class: "link-btn", onclick: () => { S.picks.clear(); renderJobs(); } }, "Clear"));
   } else {
     const todo = S.visible.filter((j) => score(j) == null && canScore(j) && !S.scoring.has(j.id));
     if (todo.length) parts.push(h("button", { class: "ghost small", title: "One quick Claude call per job, three at a time",
-      onclick: () => scoreJobs(todo.map((j) => j.id), "signal") }, `Signal-score ${todo.length} unscored`));
+      onclick: () => scoreJobs(todo.map((j) => j.id), "signal") }, `Signal score ${todo.length} unscored`));
   }
   box.replaceChildren(...parts);
   box.classList.toggle("hidden", !parts.length);
@@ -745,8 +859,8 @@ function emptyState() {
   if (!S.loaded) return h("div", { class: "list-empty" }, spinner(), " Loading roles…");
   if (filtersOn()) return h("div", { class: "list-empty" }, "No roles match these filters.", h("button", { class: "ghost", onclick: clearFilters }, "Clear filters"));
   return S.scope === "find"
-    ? h("div", { class: "list-empty" }, "No new roles here. Run your filters, or add a job you found yourself.",
-        h("button", { class: "primary", onclick: () => showTab("searches") }, "Run your filters"))
+    ? h("div", { class: "list-empty" }, "No new roles here. Search with your filters, or add a job you found yourself.",
+        h("button", { class: "primary", onclick: () => showTab("searches") }, "Go to Filters"))
     : h("div", { class: "list-empty" }, "Nothing tracked yet. Track roles from Find jobs.",
         h("button", { class: "ghost", onclick: () => showTab("find") }, "Go to Find jobs"));
 }
@@ -755,7 +869,9 @@ function starButton(j, label = false) {
     title: j.starred ? "Remove star" : "Star this role",
     onclick: (e) => { e.stopPropagation(); toggleStar(j, e.currentTarget); } }, icon("star"), label ? (j.starred ? "Starred" : "Star") : null);
 }
-const fitTile = (j, cls = "") => h("div", { class: `fit ${fitClass(score(j))} ${j.impact_score != null ? "full" : ""} ${cls}`,
+const fitTile = (j, cls = "") => RUNP.jobs.has(j.id) ? ringTile(j, cls) : h("div", {
+  class: `fit ${fitClass(score(j))} ${j.impact_score != null ? "full" : ""} ${RUNP.done.has(j.id) ? "pop" : ""} ${cls}`, "data-job": j.id, "data-cls": cls,
+  onanimationend: (e) => e.currentTarget.classList.remove("pop"),   // springs once, not each time the list is redrawn
   title: S.scoring.has(j.id) ? "Scoring…" : j.impact_score != null ? "Full score, out of 10" : j.fit != null ? "Signal score, out of 10" : "Not scored yet" },
   S.scoring.has(j.id) ? spinner() : score(j) ?? "–");
 // Applied to, with no record of the résumé that was sent.
@@ -777,6 +893,7 @@ function rowEl(j) {
       fitTile(j),
       h("div", { class: "row-main" },
         h("div", { class: "t" }, j.title || "(untitled)"),
+        runStep(j),
         h("div", { class: "s" }, [j.company, known(j.mode), known(j.pay)].filter(Boolean).join(" · ")),
         h("div", { class: "tags" },
           j.status && h("span", { class: "tag stage-tag", "data-stage": j.status }, j.status),
@@ -788,7 +905,7 @@ function rowEl(j) {
           j.pending && h("span", { class: "tag", title: "Saved here. It will be sent to Notion on the next sync." }, "To sync"),
           j.closed ? h("span", { class: "tag warn-tag", title: `Its posting had closed when the app checked on ${fmtDate(j.closed)}` }, "Closed")
             : j.dismissed && h("span", { class: "tag" }, "Dismissed"),
-          !j.local && h("span", { class: "tag", title: "None of your filters found it. Paste its description on the role, or Signal score reads it from its page." }, "No posting stored"))),
+          !j.local && h("span", { class: "tag", title: "None of your filters found it. Paste its description on the role, or a signal score reads it from its page." }, "No posting stored"))),
       starButton(j));
   }
   j._el.classList.toggle("selected", j.id === S.selected);
@@ -1075,10 +1192,11 @@ function detailHead(j) {
             " · ", h("button", { class: "link-btn", onclick: () => openStartup(j.funding.startup_id, j.company) }, "Startups tab")))),
       h("div", { class: "dhead-actions" },
         starButton(j, true),
-        // Full score first (a few minutes), then tailoring, which reuses it.
+        // Full score first, then Make résumé, which reuses it.
         j.local && !j.tailored && j.impact_score == null && scoreButton(j.id, "full", false, true),
-        j.local && !j.tailored && h("button", { class: j.tracker_id && j.impact_score != null ? "primary" : "ghost",
-          onclick: () => startRun({ kind: "tailor", job_id: j.id }) }, "Tailor résumé"),
+        j.local && !j.tailored && makeResumeButton(j, j.tracker_id && j.impact_score != null ? "primary" : "ghost"),
+        j.local && !j.tailored && h("button", { class: "icon-btn help-btn", title: "What's the difference? What each does", "aria-label": "What each does",
+          onclick: openActionsHelp }, icon("info")),
         h("button", { class: "icon-btn fold-btn", title: "Fold this header to one line", "aria-label": "Fold the header",
           "aria-expanded": "true", onclick: () => setFold("head", true) }, icon("up")),
         h("button", { class: "icon-btn drawer-close", title: "Close", "aria-label": "Close", onclick: closeDrawer }, icon("close")))),
@@ -1087,7 +1205,7 @@ function detailHead(j) {
       referralControl(j),
       extLink(j.url, "Posting"),
       extLink(j.notion_url, "Notion"),
-      j.tailored ? h("span", { class: "score" }, "Impact record ", h("b", {}, j.impact_score ?? "–"), "/10 · Résumé ",
+      j.tailored ? h("span", { class: "score" }, "Full score ", h("b", {}, j.impact_score ?? "–"), "/10 · Résumé ",
         h("b", {}, j.resume_score ?? "–"), "/10 · ATS ", h("b", {}, pct(j.ats_total)))
         : j.impact_score != null && h("span", { class: "score" }, "Full score ", h("b", {}, j.impact_score), "/10")),
     j.tracker_id && stagePath(j));
@@ -1113,11 +1231,10 @@ function renderDetailHead() {
 }
 function scoreButton(id, kind, scored, primary = false) {
   const busy = S.scoring.get(id);
-  const label = kind === "full" ? (scored ? "Run full score again" : "Run full score") : scored ? "Run again" : "Signal score";
-  return h("button", { class: primary || !(scored || kind === "full") ? "primary" : "ghost", disabled: !!busy,
-    title: kind === "full" && !scored ? "Rates every requirement against your impact record and each résumé, with a heat map. About four Claude calls and a few minutes." : null,
+  const label = kind === "full" ? (scored ? "Run full score again" : "Run full score") : scored ? "Signal score again" : "Signal score";
+  return h("button", { class: primary || !(scored || kind === "full") ? "primary" : "ghost", disabled: !!busy, title: ACTIONS[kind].what,
     onclick: () => scoreJobs([id], kind) },
-    busy?.kind === kind ? [spinner(), busy.state === "queued" ? " Waiting its turn…" : kind === "full" ? " Scoring… a few minutes" : " Scoring… about half a minute"] : label);
+    busy?.kind === kind ? [spinner(), busy.state === "queued" ? " Waiting its turn…" : ` Scoring… ${actionTime(kind)}`] : [label, timeTag(kind)]);
 }
 function renderDetail() {
   const box = $("#job-detail");
@@ -1146,7 +1263,7 @@ function renderDetail() {
       panel.append(h("div", { class: "pad" },
         h("div", { class: "notice" },
           h("p", {}, "This role is in your tracker but none of your filters found it, so its posting isn't stored yet. ",
-            "Paste the description from the posting's page: it's kept with this role, and the scores and tailoring compare your impact record against it."),
+            "Paste the description from the posting's page: it's kept with this role, and the scores and Make résumé compare your impact record against it."),
           scoreError(j.id),
           h("div", { class: "actions-inline" },
             h("button", { class: "primary", onclick: () => openDescribe(j) }, "Paste the description…"), read)),
@@ -1183,14 +1300,13 @@ function renderDetail() {
 
 // What a Résumé, Fit report or Heat map tab says before the run that fills it.
 function emptyTab(j, d, tab) {
-  const tailor = h("button", { class: "primary", onclick: () => startRun({ kind: "tailor", job_id: j.id }) }, "Tailor résumé");
+  const tailor = makeResumeButton(j);
   const what = {
-    resume: ["No tailored résumé yet",
-      "Tailoring writes a résumé for this posting from your impact record, along with the Fit report and the heat map. It makes a series of Claude calls and takes several minutes; you can follow it in Runs."],
+    resume: ["No résumé made yet", `${ACTIONS.resume.what} It takes ${actionTime("resume")}; you can follow its log in Runs.`],
     report: ["No fit report yet",
-      "The fit report comes from tailoring a résumé: the scores, the ATS scorecard, the gaps, and at the end, the follow-up questions to answer. Add your answers as confirmed facts in the Impact record tab, then tailor again."],
+      "Make résumé writes the fit report: the scores, the ATS scorecard, the gaps, and at the end, the follow-up questions to answer. Add your answers as confirmed facts in the Impact record tab, then make the résumé again."],
     heatmap: ["No heat map yet",
-      "The heat map rates every requirement in the posting against your impact record and each résumé. A full score makes one in a few minutes without writing a résumé; tailoring makes one too."],
+      `The heat map rates every requirement in the posting against your impact record and each résumé. A full score makes one in ${actionTime("full")} without writing a résumé; Make résumé makes one too.`],
   }[tab];
   return h("div", { class: "pad" }, h("div", { class: "notice" },
     h("h3", {}, what[0]), h("p", {}, what[1]), scoreError(d.id),
@@ -1272,10 +1388,10 @@ async function renderOutside(j, panel) {
     panel.replaceChildren(h("div", { class: "pad" }, h("div", { class: "notice" },
       h("h3", {}, "No résumé for this role yet"),
       h("p", {}, j.local
-        ? "Tailor one here, or pick a résumé you made with the résumé skill in a Claude chat. Tailoring also writes the Fit report and the heat map."
-        : "Pick a résumé you made with the résumé skill in a Claude chat. To tailor one here, the app needs the posting: paste its description."),
+        ? "Make one here, or pick a résumé you made with the résumé skill in a Claude chat. Make résumé also writes the Fit report and the heat map."
+        : "Pick a résumé you made with the résumé skill in a Claude chat. To make one here, the app needs the posting: paste its description."),
       o.options.length ? pick : h("p", { class: "muted" }, "No résumé runs (resume-runs/) or saved résumés (references/resume-*.md) in your profile folder."),
-      j.local ? h("button", { class: "primary", onclick: () => startRun({ kind: "tailor", job_id: j.id }) }, "Tailor résumé")
+      j.local ? makeResumeButton(j)
         : h("button", { class: "ghost", onclick: () => openDescribe(j) }, "Paste the description…"))));
     return;
   }
@@ -1291,7 +1407,7 @@ const BULLET = /^\s*(?:[-*•·–]|\d+[.)])\s+/;
 function postingBody(text) {
   const lines = (text || "").split("\n").map((l) => l.trim());
   const box = h("div", { class: "posting-body" });
-  if (!lines.some(Boolean)) { box.append(h("p", { class: "muted" }, "No posting text is stored for this job. Paste the description from its page to score and tailor against it.")); return box; }
+  if (!lines.some(Boolean)) { box.append(h("p", { class: "muted" }, "No posting text is stored for this job. Paste the description from its page to score it and make its résumé.")); return box; }
   const next = (i) => lines.slice(i + 1).find(Boolean) || "";
   let list = null;
   lines.forEach((line, i) => {
@@ -1329,7 +1445,7 @@ function openDescribe(j, text = "") {
   formError(descForm);
   descForm.elements.namedItem("description").value = text;
   $("#describe-for").textContent = `${j.title}${j.company ? " at " + j.company : ""}. Copy the whole posting from its page. `
-    + "It's kept with this role and used in place of any stored text when scoring and tailoring.";
+    + "It's kept with this role and used in place of any stored text when scoring it and making its résumé.";
   descDialog.showModal();
 }
 descForm.addEventListener("submit", async (e) => {
@@ -1343,7 +1459,7 @@ descForm.addEventListener("submit", async (e) => {
     await loadJobs();
     if (S.selected === j.id) { S.detailTab = "posting"; S.detailTabJob = j.id; renderDetail(); loadDetail(j.id); }
     scoreJobs([j.id], "signal");
-    toast("Posting saved. Signal scoring it against your impact record now.");
+    toast("Posting saved. Getting its signal score now.");
   } catch (err) { formError(descForm, err.message); }
   finally { save.disabled = false; }
 });
@@ -1372,13 +1488,13 @@ function fullBlock(j, d) {
         h("div", {},
           h("h3", {}, "Full score"),
           h("div", { class: "band" }, n == null ? "" : BANDS.find(([min]) => n >= min)[1]),
-          h("p", {}, "The tailoring run rated every requirement: impact record ", h("b", {}, n ?? "–"), "/10, tailored résumé ",
+          h("p", {}, "Make résumé rated every requirement: full score ", h("b", {}, n ?? "–"), "/10, the résumé it made ",
             h("b", {}, j.resume_score ?? "–"), "/10, ATS ", h("b", {}, pct(j.ats_total)),
             ". The résumé and ATS scores follow the current version: every edit is rated again. See Fit report and Heat map."))));
   }
   if (!f) {
     return h("div", { class: "notice" }, h("h3", {}, "Full score"),
-      h("p", {}, "Rates every requirement in the posting against your impact record and each résumé, with a heat map and the gaps to confirm. About four Claude calls and a few minutes. Tailoring this role later reuses it."),
+      h("p", {}, `${ACTIONS.full.what} ${ACTIONS.full.calls[0].toUpperCase() + ACTIONS.full.calls.slice(1)}, ${actionTime("full")}.`),
       scoreButton(d.id, "full", false));
   }
   const impact = f.scores["Impact record"];
@@ -1397,7 +1513,7 @@ function fullBlock(j, d) {
         h("h3", {}, "Full score"),
         h("div", { class: "band" }, impact == null ? "" : BANDS.find(([min]) => impact >= min)[1]),
         best[1] != null && impact != null && impact - best[1] >= 1 && h("p", { class: "muted" },
-          `Your best existing résumé scores ${best[1]}/10, so tailoring can gain about ${impact - best[1]} ${impact - best[1] === 1 ? "point" : "points"}.`))),
+          `Your best existing résumé scores ${best[1]}/10, so Make résumé can gain about ${impact - best[1]} ${impact - best[1] === 1 ? "point" : "points"}.`))),
     h("table", { class: "sources" },
       h("thead", {}, h("tr", {}, ...["Source", "/10", "Skills", "Exp.", "ATS"].map((x) => h("th", {}, x)))),
       h("tbody", {}, row(["Impact record", impact]), ...resumes.sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0)).map(row))),
@@ -1415,7 +1531,7 @@ function signalBlock(j, d) {
   if (!t) {
     return h("div", { class: "notice" },
       h("h3", {}, "Signal score"),
-      h("p", {}, "A quick read on fit: one Claude call scores this posting against your impact record from 1 to 10, with the strongest matches, the hard requirements to check and the likely gaps."),
+      h("p", {}, `${ACTIONS.signal.what} ${ACTIONS.signal.calls[0].toUpperCase() + ACTIONS.signal.calls.slice(1)}, ${actionTime("signal")}.`),
       scoreButton(d.id, "signal", false));
   }
   const list = (title, items, cls = "") => h("div", { class: `card ${cls}` }, h("h3", {}, title),
@@ -1498,7 +1614,7 @@ function renderResume(d, panel) {
             try { await post(`/api/jobs/${id}/restore`, { n: v.n }); toast(`Restored v${v.n} as a new version.`); reloadResume(d.id); }
             catch (e) { toast(e.message, true); } } }, "Restore")))));
   const readOnly = r.editable === false && h("div", { class: "card" }, h("h3", {}, "Chat with Claude isn't available"),
-    h("p", { class: "muted" }, "This résumé was saved without its posting and match brief, which Claude needs to check edits against. Tailor the job in the app to get a copy Claude can edit. You can still change the wording yourself: Edit on page, above the PDF."));
+    h("p", { class: "muted" }, "This résumé was saved without its posting and match brief, which Claude needs to check edits against. Use Make résumé in the app to get a copy Claude can edit. You can still change the wording yourself: Edit on page, above the PDF."));
   editpane.append(readOnly || askCard, proposalBox, metrics, hist);
   panel.append(h("div", { class: "resume" }, pdfpane, editpane));
 
@@ -1678,7 +1794,7 @@ const versionAts = (j, v) => v?.ats ?? j?.ats_total;
 const versionScore = (j, v) => v?.resume_score ?? j?.resume_score;
 function scoreMeters(j, cur) {
   const pctBand = (v) => (v >= 80 ? "hi" : v >= 60 ? "mid" : "lo");
-  const rows = [["Fit", j && score(j), 10, "/10", fitClass], ["Résumé", versionScore(j, cur), 10, "/10", fitClass],
+  const rows = [[j?.impact_score != null ? "Full score" : "Signal score", j && score(j), 10, "/10", fitClass], ["Résumé", versionScore(j, cur), 10, "/10", fitClass],
                 ["ATS", versionAts(j, cur), 100, "%", pctBand], ["Keywords", cur?.keywords_pct, 100, "%", pctBand]]
     .filter(([, v]) => v != null);
   if (!rows.length) return null;
@@ -2096,16 +2212,16 @@ function renderRunResults(r) {
   box.classList.toggle("hidden", !r || r.status === "running");
   if (!r || r.status === "running") { box.replaceChildren(); return; }
   if (!res.length) {
-    box.replaceChildren(h("p", { class: "muted" }, r.status === "done" ? "This run didn't score or tailor any jobs."
+    box.replaceChildren(h("p", { class: "muted" }, r.status === "done" ? "This run didn't score any jobs or make any résumés."
       : r.status === "interrupted" ? "The app was closed while this run was going, so it stopped and its results weren't collected."
-      : "No jobs were scored or tailored."));
+      : "No jobs were scored and no résumés made."));
     return;
   }
   const tailored = res.filter((x) => x.tailored).length;
   box.replaceChildren(
     h("h3", {}, `Results: ${plural(res.length, "job")}`),
     h("p", { class: "muted" }, tailored
-      ? "Open a tailored job's Fit report: its follow-up questions are at the end. Add your answers as confirmed facts in the Impact record tab, then tailor again if they change what the résumé can claim."
+      ? "Open a job's Fit report: its follow-up questions are at the end. Add your answers as confirmed facts in the Impact record tab, then make the résumé again if they change what it can claim."
       : "Open a job to see its score, matches and likely gaps beside the posting."),
     h("ul", {}, ...res.map((x) => h("li", {},
       h("span", { class: `fit ${fitClass(x.impact_score ?? x.fit)}` }, x.impact_score ?? x.fit ?? "–"),
@@ -2174,7 +2290,7 @@ const suMatches = (s, { rounds = true } = {}) => SU_VIEWS.find(([k]) => k === SU
   && SU.tokens.every((t) => s._hay.includes(t)) && (!rounds || !SU.rounds.size || SU.rounds.has(s.stage));
 function renderStartupState() {
   const el = $("#startup-state");
-  const going = (S.summary?.active_runs || []).find((r) => r.label === "Startup search");
+  const going = (S.summary?.active_runs || []).find(isStartupRefresh);
   $("#startup-refresh").disabled = !!going;
   if (going) el.replaceChildren(spinner(), " Reading the sources… ", h("button", { class: "link-btn", onclick: () => { showTab("runs"); selectRun(going.id); } }, "follow it in Runs"));
   else if (SU.refreshed) {
@@ -2351,7 +2467,7 @@ function rolesCard(s, busy) {
     s.roles.checked ? ` · read ${fmtDate(s.roles.checked)}` : "", match.length ? ` · ${match.length} match your filters (title and place) and are in Find jobs` : jobs.length ? " · none match your filters' titles and places" : ""));
   const roleLi = (j) => {
     const added = j.job_id && h("button", { class: "ghost small", title: "Added on its own, because it matches your filters", onclick: () => openJob(j.job_id, "posting") }, j.status ? `Tracked · ${j.status}` : "In Find jobs");
-    const addBtn = h("button", { class: j.match ? "primary small" : "ghost small", title: "Stores the posting here, with the round, so you can score or tailor it" }, "Add to Find jobs");
+    const addBtn = h("button", { class: j.match ? "primary small" : "ghost small", title: "Stores the posting here, with the round, so you can score it or make its résumé" }, "Add to Find jobs");
     addBtn.addEventListener("click", () => addRole(s, j, addBtn));
     return h("li", { class: j.match ? "match" : "" },
       h("div", { class: "what" }, h("div", { class: "t" }, j.title), h("div", { class: "s" }, [j.location, j.remote && "Remote", j.pay, j.posted && `Posted ${fmtDate(j.posted + "T12:00")}`].filter(Boolean).join(" · "))),
@@ -2383,7 +2499,7 @@ suForm.addEventListener("submit", async (e) => {
     suDialog.close();
     SU.view = "all"; SU.rounds.clear(); renderStartups();
     selectStartup(s.id);
-    toast(s.line ? `${s.name}: ${s.line}` : `Added ${s.name}. Find open roles reads its careers board.`);
+    toast(s.line ? `${s.name}: ${s.line}` : `Added ${s.name}. Check its board now reads its careers board.`);
   } catch (err) { formError(suForm, err.message); }
 });
 
@@ -2504,7 +2620,7 @@ window.addEventListener("beforeunload", (e) => { if (profileDirty() || aiDirty()
 // ---- the AI: which provider and models do the work (searches.yaml's models: section, the key in the profile's .env)
 const AI = { data: null, base: "", models: [] };
 const aForm = $("#ai-form"), aField = (n) => aForm.elements.namedItem(n);
-const AI_STAGES = [["triage", "Quick score", "one short call per job"],
+const AI_STAGES = [["triage", "Signal score", "one short call per job"],
                    ["analysis", "Analysis", "reading the posting, matching your evidence"],
                    ["writer", "Writing", "the résumé drafts and the merge"],
                    ["rescore", "Live scores", "re-rating each résumé edit in the chat"]];

@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE TABLE IF NOT EXISTS run_lines (
   run_id INTEGER NOT NULL, n INTEGER NOT NULL, line TEXT NOT NULL,
+  at REAL,        -- when it was printed (Unix time), to learn how long each step of a run takes
   PRIMARY KEY (run_id, n)
 );
 """
@@ -54,6 +56,7 @@ class Run:
     args: list[str]
     started: str
     lines: list[str] = field(default_factory=list)
+    line_at: list[Optional[float]] = field(default_factory=list)   # when each line was printed (None before lines had times)
     returncode: Optional[int] = None
     finished: Optional[str] = None
     proc: Optional[subprocess.Popen] = None
@@ -87,6 +90,8 @@ class RunManager:
             db.parent.mkdir(parents=True, exist_ok=True)
             with closing(self._db()) as con, con:
                 con.executescript(SCHEMA)
+                if "at" not in {c["name"] for c in con.execute("PRAGMA table_info(run_lines)")}:
+                    con.execute("ALTER TABLE run_lines ADD COLUMN at REAL")   # a database from before lines had times
             self._load()
 
     def _db(self) -> sqlite3.Connection:
@@ -102,8 +107,9 @@ class RunManager:
                                          returncode=r["returncode"], finished=r["finished"],
                                          marks=json.loads(r["marks"]) if r["marks"] else None,
                                          results=json.loads(r["results"]) if r["results"] else None)
-            for r in con.execute("SELECT run_id, line FROM run_lines ORDER BY run_id, n"):
+            for r in con.execute("SELECT run_id, line, at FROM run_lines ORDER BY run_id, n"):
                 self.runs[r["run_id"]].lines.append(r["line"])
+                self.runs[r["run_id"]].line_at.append(r["at"])
         self._next = max(self.runs, default=0) + 1
 
     def running(self) -> list[Run]:
@@ -143,10 +149,11 @@ class RunManager:
         con = self._db() if self.db is not None else None
         try:
             for line in run.proc.stdout:
-                line = line.rstrip("\n")
+                line, at = line.rstrip("\n"), time.time()
                 if con is not None:   # saved before it's shown, so a line the UI has seen is never lost
                     with con:
-                        con.execute("INSERT INTO run_lines(run_id, n, line) VALUES(?, ?, ?)", (run.id, len(run.lines), line))
+                        con.execute("INSERT INTO run_lines(run_id, n, line, at) VALUES(?, ?, ?, ?)", (run.id, len(run.lines), line, at))
+                run.line_at.append(at)
                 run.lines.append(line)
             returncode = run.proc.wait()
             finished = datetime.now(timezone.utc).isoformat(timespec="seconds")

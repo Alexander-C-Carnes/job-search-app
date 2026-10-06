@@ -15,7 +15,7 @@ from jobpipe import config, render
 from jobpipe.llm import AgentResult
 from jobpipe.notion import NotionTracker
 from jobpipe.store import Store
-from jobpipe.web.runs import RunManager
+from jobpipe.web.runs import Run, RunManager
 from jobpipe.web.server import create_app
 from conftest import BASE, TITLE, FakeNotion, FakeRunner, _resume, make_job, notion_row
 
@@ -735,7 +735,7 @@ def test_run_results_list_the_jobs_it_scored(env):
     # After a restart the run, its output and its results are still there.
     again = RunManager(db=env["runs"].db)
     run = again.runs[r.json()["id"]]
-    assert run.status == "done" and run.label == "Search + triage" and run.args == ["run", "--search", "tpm-remote", "--no-tailor"]
+    assert run.status == "done" and run.label == "Search + signal score" and run.args == ["run", "--search", "tpm-remote", "--no-tailor"]
     assert [x["id"] for x in run.results] == ["j2"]
 
 
@@ -758,6 +758,103 @@ def test_runs_are_kept_in_the_database(tmp_path):
     assert a.finished and a.results is None
     assert (b.lines, b.status, b.returncode) == (["started"], "interrupted", None)
     assert reopened.active() is None and reopened.start("third", []).id == second.id + 1
+
+    assert all(isinstance(t, float) for t in a.line_at) and len(a.line_at) == 2   # each line keeps when it was printed
+
+
+def test_run_lines_get_times_in_an_older_database(tmp_path):
+    import sqlite3
+    db = tmp_path / "tracker.db"
+    with sqlite3.connect(db) as con:   # the schema from before lines had times, with one old run
+        con.executescript("CREATE TABLE runs (id INTEGER PRIMARY KEY, label TEXT NOT NULL, args TEXT NOT NULL, started TEXT NOT NULL, "
+                          "finished TEXT, returncode INTEGER, marks TEXT, results TEXT); "
+                          "CREATE TABLE run_lines (run_id INTEGER NOT NULL, n INTEGER NOT NULL, line TEXT NOT NULL, PRIMARY KEY (run_id, n)); "
+                          "INSERT INTO runs VALUES (1, 'old', '[]', '2026-10-01T10:00:00+00:00', '2026-10-01T10:20:00+00:00', 0, NULL, NULL); "
+                          "INSERT INTO run_lines VALUES (1, 0, 'hello');")
+    runs = RunManager(argv_prefix=[sys.executable, "-c", "print('new')"], db=db)
+    assert runs.runs[1].lines == ["hello"] and runs.runs[1].line_at == [None]
+    runs.wait(runs.start("new", []).id)
+    assert RunManager(db=db).runs[2].line_at[0] > 0
+
+
+def _tailor_run(rid, lines, started, finished=None, returncode=None, job="j1"):
+    """A tailoring run with its lines printed at the given seconds after `started` (a Unix time)."""
+    from datetime import datetime, timezone
+    iso = lambda t: datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="seconds")
+    run = Run(rid, f"Tailor {job}", ["tailor", job], iso(started), finished=iso(finished) if finished else None, returncode=returncode)
+    run.lines = [line for line, _ in lines]
+    run.line_at = [None if at is None else started + at for _, at in lines]
+    if finished is None:
+        run.proc = object()   # still going
+    return run
+
+
+FULL_RUN = [("Tailoring: TPM @ Northwind Cloud", 5), ("  Stage 1: objectives, skills, experience", 60), ("  Stage 2: matcher", 200),
+            ("  Stage 3: writers A, B, C", 500), ("  Stage 3: rating drafts", 800), ("  Stage 4: merge", 900),
+            ("  Stage 4: merge scored 85% < Draft A 86%; restoring keywords", 1100), ("  Stage 5: PDF", 1300),
+            ("  Stage 6: heat map and report", 1330)]
+
+
+def test_tailoring_progress_learns_each_steps_time_from_past_runs():
+    from jobpipe.web.progress import Estimator, STEPS
+    runs = RunManager(argv_prefix=[sys.executable, "-c", "pass"])
+    t0 = 1_790_000_000
+    for k in range(3):   # three finished runs, 1500 s each: their steps take 60, 140, 300, 300, 100, 400, 30, 170 s
+        runs.runs[k + 1] = _tailor_run(k + 1, FULL_RUN, t0 + k * 10_000, finished=t0 + k * 10_000 + 1500, returncode=0)
+    est = Estimator(runs)
+    assert [round(m) for m in est.medians()] == [60, 140, 300, 300, 100, 400, 30, 170]
+
+    # a run 100 s into its writers step (500 s in): 200 of 300 s left there, then 100 + 400 + 30 + 170 after it
+    now = t0 + 50_000
+    run = runs.runs[9] = _tailor_run(9, FULL_RUN[:4], now - 600, job="j9")
+    p = est.of(run, now=now)
+    assert (p["job"], p["step"], p["n"], p["of"]) == ("j9", STEPS[3][0], 4, 8)
+    assert p["eta_s"] == 900 and p["total_s"] == 1500 and not p["slow"]
+    assert p["fraction"] == round(600 / 1500, 4) and p["cap"] == round((500 + 285) / 1500, 4)
+
+    # long past the step's usual time it's "slow", stays just short of the step's end, and keeps a small floor of time
+    late = est.of(run, now=now + 2000)
+    assert late["slow"] and late["fraction"] == late["cap"] and late["eta_s"] == 30 + 700 == late["eta_min_s"]
+
+    # a job that already had a full score skips steps 2 and 3, so it has six steps and less time to go
+    reused = [FULL_RUN[0], ("  Stages 1-2: reusing this job's full score", 20), ("  Stage 3: writers A, B, C", 40)]
+    r = est.of(_tailor_run(10, reused, now - 40, job="j10"), now=now)
+    assert (r["n"], r["of"], r["eta_s"]) == (2, 6, 300 + 100 + 400 + 30 + 170)
+
+    # only tailoring runs that are going get a ring
+    assert est.of(runs.runs[1], now=now) is None
+    search = Run(11, "Search", ["search"], "2026-10-06T10:00:00+00:00")
+    search.proc = object()
+    assert est.of(search, now=now) is None
+
+
+def test_tailoring_progress_before_runs_had_step_times():
+    """Old runs only say how long they took in all: the first guesses are stretched to match."""
+    from jobpipe.web.progress import DEFAULT_S, Estimator
+    runs = RunManager(argv_prefix=[sys.executable, "-c", "pass"])
+    t0 = 1_790_000_000
+    total = 2 * sum(DEFAULT_S)
+    for k in range(2):
+        runs.runs[k + 1] = _tailor_run(k + 1, [(line, None) for line, _ in FULL_RUN], t0 + k * 10_000, finished=t0 + k * 10_000 + total, returncode=0)
+    assert Estimator(runs).medians() == [2 * d for d in DEFAULT_S]
+
+
+def test_summary_says_how_far_a_tailoring_run_is(env):
+    c, runs = env["client"], env["runs"]
+    runs.argv_prefix = [sys.executable, "-c", "import time; print('Tailoring: x @ y'); print('  Stage 1: objectives'); time.sleep(30)"]
+    run = runs.start("Tailor x", ["tailor", "j1"])
+    try:
+        for _ in range(100):
+            if len(run.lines) >= 2:
+                break
+            threading.Event().wait(0.05)
+        d = c.get("/api/summary", headers=H).json()
+        assert d["durations"]["make_resume_s"] > d["durations"]["full_score_s"] > 0   # the times on the job's buttons
+        p = d["active_runs"][0]["progress"]
+        assert (p["job"], p["step"], p["n"], p["of"]) == ("j1", "Pulling out requirements", 2, 8) and p["eta_s"] > 0
+    finally:
+        run.proc.kill()
+        runs.wait(run.id)
 
 
 def test_outside_resume_for_a_job_only_in_the_tracker(env, tmp_path):
@@ -861,7 +958,7 @@ def test_runs_side_by_side(env):
     tailor = start(kind="tailor", job_id="j2")                       # a tailoring run goes alongside
     assert tailor.status_code == 200
     r = start(kind="tailor", job_id="j2")                            # but not twice for one job
-    assert r.status_code == 409 and "already being tailored" in r.json()["detail"]
+    assert r.status_code == 409 and "already being made" in r.json()["detail"]
     assert {x["id"] for x in c.get("/api/summary", headers=H).json()["active_runs"]} == {search.json()["id"], tailor.json()["id"]}
 
     runs.max_runs = 2
@@ -972,7 +1069,7 @@ def test_track_and_dismiss_found_jobs(env):
     created = next(row["_create"]["properties"] for row in notion.rows.values() if "_create" in row)
     assert created["Name"]["title"][0]["text"]["content"] == f"{TITLE} — Beta"
     assert created["Status"]["status"]["name"] == "Not started" and created["Fit Score"]["number"] == 5.0
-    assert created["Notes"]["rich_text"][0]["text"]["content"].startswith("Triaged ")
+    assert created["Notes"]["rich_text"][0]["text"]["content"].startswith("Scored ")
     j2 = {j["id"]: j for j in c.get("/api/jobs?refresh=1", headers=H).json()["jobs"]}["j2"]
     assert j2["notion_page_id"] and j2["status"] == "Not started" and j2["pending"] is False
 
@@ -1134,7 +1231,7 @@ def test_search_once_runs_the_dialogs_filter_without_saving_it(env):
     spec = {"name": "Director, remote", "titles": ["Director of Engineering", ""], "remote": True, "limit": "3",
             "min_salary_usd": "", "id": "tpm-remote"}
     r = c.post("/api/runs", headers=H, json={"kind": "once", "search": spec})
-    assert r.status_code == 200 and r.json()["label"] == "Search once: Director of Engineering + score"
+    assert r.status_code == 200 and r.json()["label"] == "Search once: Director of Engineering + signal score"
     runs.wait(r.json()["id"])
     args = ast.literal_eval(c.get(f"/api/runs/{r.json()['id']}", headers=H).json()["lines"][0][len("args "):])
     assert args[:3] == ["run", "--no-tailor", "--search-json"]
@@ -1246,13 +1343,13 @@ def test_startups_tab_roles_into_find_jobs_and_the_tracker(env, monkeypatch):
     assert c.post("/api/startups/nope/roles", headers=H).status_code == 404
     assert "no lookup key" in c.post("/api/startups/nova-labs/enrich", headers=H).json()["detail"]
     run = c.post("/api/startups/refresh", headers=H).json()
-    assert run["label"] == "Startup search" and run["args"] == ["startups", "refresh"]
+    assert run["label"] == "Refresh startup sources" and run["args"] == ["startups", "refresh"]
     assert c.post("/api/startups/refresh", headers=H).status_code == 409
     env["runs"].wait(run["id"])
     sm = c.get("/api/summary", headers=H).json()["startups"]
     assert sm["count"] == 4 and sm["hiring"] == 1 and sm["auto_refresh_hours"] == 24        # Acme has a matching role
     # the app's own timer: a refresh is due while the sources have never been read, not once they just were
-    assert env["app"].state.auto_refresh().label == "Startup search"
+    assert env["app"].state.auto_refresh().label == "Refresh startup sources"
     env["runs"].wait(env["runs"].active().id) if env["runs"].active() else None
     su.StartupStore(config.DATA / "startups.json").update_meta(refreshed=now_iso_for_test())
     assert env["app"].state.auto_refresh() is None
