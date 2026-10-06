@@ -45,6 +45,8 @@ You're chatting with {name} about his tailored resume for one job, like a sharp 
 
 Every turn, write `reply.md`: your chat message to him. Talk the way you would in a chat: direct, plain prose, short unless he asks for depth, no headings. Answer questions, give your honest opinion when he asks for it (how a line reads, what a recruiter would question, whether the resume fits the role), suggest changes, and ask a clarifying question when a request is ambiguous enough that guessing would waste an edit.
 
+Scores: scores.md has the app's scores for this resume, exactly as he sees them in the job's header, the list and the Full score card: the resume score, the ATS total and its parts, the impact record score, and each requirement's rating. When he asks about a score, give those numbers. Never give a score of your own, not even an estimate: a second number contradicts what's on his screen. Explain a score from the requirement ratings (which rows are partial or missing, and what evidence would move them). If you think a rating is wrong, say which row and why, but the score is still the app's. When you propose an edit, don't predict its score: the app re-rates every proposal and shows its scores next to it. Scores mentioned earlier in the conversation may be out of date; scores.md is current.
+
 Only when he asks for a change, or says yes to one you suggested, also write `resume-edited.md`: the complete revised resume. Otherwise don't write it. If a proposed edit is still pending, the resume he's looking at is that proposal; when he's refining it ("shorter", "undo the second bullet"), build on it. In `reply.md` say briefly what you changed, the evidence or ledger IDs behind it where there are any, and any risk worth knowing.
 
 It's his resume, so his instruction is final: make the change he asks for, exactly as he words it, even where it goes past the evidence, the Do-not-claim list, or the resume rules (a title or level in the headline, a broader scope, a number). Never decline, water it down, or swap in a "closest supported" version. If you think a change carries a risk (a claim a recruiter or reference check could question, a title he hasn't held, a failed format check), make it anyway and add a one-line note on the risk in reply.md.
@@ -233,6 +235,41 @@ class ResumeWorkspace:
                 return {"ratings": v["ratings"], "score": v.get("resume_score")}
         return {"ratings": rows["ratings"], "score": rows["score"]}
 
+    def score_sheet(self, h: dict) -> Optional[str]:
+        """The scores the app shows for the current version (and a pending proposal), for the chat, so Claude
+        quotes them instead of scoring the résumé itself. None when the version has no scores."""
+        rows = self.requirements()
+        v = next((v for v in h["versions"] if v["n"] == h["current"]), {})
+        if not rows or v.get("ats") is None:
+            return None
+        num = lambda x: "n/a" if x is None else f"{x:g}"
+        parts = v.get("ats_parts") or {}
+        lines = [f"# The app's scores (current version, v{v['n']})", "",
+                 f"- Resume score: {num(v.get('resume_score'))}/10",
+                 f"- ATS: {num(v['ats'])}% (skills {num(parts.get('skills'))}%, experience "
+                 f"{num(parts.get('experience'))}%, keywords {num(parts.get('keywords'))}%; the target is 80%)"]
+        try:
+            d = json.loads((self.run_dir / "ratings-final.json").read_text())
+            impact = d["scores"][d["sources"].index(config.IMPACT_SOURCE)]
+            lines.append(f"- Impact record score: {num(impact)}/10 (his record against the posting, rated when the "
+                         "resume was tailored; editing the record since doesn't change it)")
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            pass
+        if v.get("rating"):
+            lines.append("- A hand edit is still being re-rated: skills, experience and the resume score may change "
+                         "in a few seconds.")
+        elif v.get("rerated") is False:
+            lines.append("- Re-rating this version failed, so skills, experience and the resume score are the "
+                         "previous version's; only keywords were measured on it.")
+        if (p := h.get("proposal")) and p.get("ats") is not None:
+            lines.append(f"- Pending proposal (not accepted yet): resume score {num(p.get('resume_score'))}/10, "
+                         f"ATS {num(p['ats'])}%")
+        ratings = v.get("ratings") or rows["ratings"]
+        for sec in ("skills", "experience"):
+            lines += ["", f"## {sec.capitalize()} ratings", ""]
+            lines += [f"- [{r['weight']}] {r['requirement']}: {x}" for r, x in zip(rows[sec], ratings[sec])]
+        return "\n".join(lines) + "\n"
+
     def check(self, md_path: Path) -> dict:
         title = self.title()
         if not title:
@@ -265,6 +302,8 @@ class ResumeWorkspace:
         pending = (self.vdir / "proposal.md").read_text() if h.get("proposal") and (self.vdir / "proposal.md").exists() else ""
         if pending:
             docs["resume-proposed.md (pending, not accepted yet; the PDF on screen)"] = pending
+        if sheet := self.score_sheet(h):
+            docs["scores.md"] = sheet
         who = {"user": cand.first_name, "claude": "You", "note": "(app)"}
         convo = "\n\n".join(f"{who.get(m['role'], m['role'])}: {m['text']}" for m in self.chat()[-CHAT_TURNS:])
         convo = convo or f"(this is {cand.first_name}'s first message)"

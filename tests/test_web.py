@@ -509,6 +509,20 @@ def test_failed_rerating_keeps_the_edit_and_rescores_keywords_only(env):
     assert next(j for j in c.get("/api/jobs", headers=H).json()["jobs"] if j["id"] == "j1")["ats_total"] == 60.5
 
 
+def test_chat_quotes_the_apps_scores(env):
+    c, runner = env["client"], env["runner"]
+    _ratings(env["run_dir"])
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "What's the score?"})
+    call = runner.calls[-1]
+    sheet = call.documents["scores.md"]
+    assert "Resume score: 8/10" in sheet and "ATS: 75.5%" in sheet and "Pending" not in sheet
+    assert "- [Med] Reliability: partial" in sheet and "Never give a score of your own" in call.instructions
+
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Lead with reliability"})
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Better?"})
+    assert "Pending proposal (not accepted yet): resume score 8/10" in runner.calls[-1].documents["scores.md"]
+
+
 def test_edit_discard_and_validation(env):
     c = env["client"]
     assert c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "  "}).status_code == 400
