@@ -128,9 +128,10 @@ class Store:
         _write(self.state_path, state)
 
     def update(self, jid: str, **fields: Any) -> None:
-        """Inside a run started by the web app, also records that run as the job's `last_run`."""
-        if os.environ.get("JOBPIPE_RUN_ID"):
-            fields["last_run"] = int(os.environ["JOBPIPE_RUN_ID"])
+        """Records the web-app run making the change as the job's `last_run`; a change made outside
+        any run (the app's own scoring, the terminal) clears it, so no run claims that change."""
+        run_id = os.environ.get("JOBPIPE_RUN_ID")
+        fields["last_run"] = int(run_id) if run_id else None
         with self._locked():
             state = self.state()
             state.setdefault(jid, {"first_seen": now_iso(), "searches": []}).update(fields)

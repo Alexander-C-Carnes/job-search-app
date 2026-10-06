@@ -904,6 +904,21 @@ def test_overlapping_runs_keep_their_own_results(env, monkeypatch):
     assert [x["id"] for x in c.get(f"/api/runs/{b}", headers=H).json()["results"]] == ["j2"]
 
 
+def test_a_job_scored_in_the_app_during_a_run_is_not_the_runs(env, monkeypatch):
+    c, runs, store = env["client"], env["runs"], env["store"]
+    runs.runs.clear()
+    runs.argv_prefix = [sys.executable, "-c", "import time; time.sleep(5)"]
+    rid = c.post("/api/runs", headers=H, json={"kind": "tailor", "job_id": "j1"}).json()["id"]
+    monkeypatch.setenv("JOBPIPE_RUN_ID", str(rid))
+    store.update("j1", triage={"fit_score": 9}, triaged_at="2026-10-02")
+    store.update("j2", triage={"fit_score": 8}, triaged_at="2026-10-02")    # an earlier run touched it...
+    monkeypatch.delenv("JOBPIPE_RUN_ID")
+    store.update("j2", triage={"fit_score": 7}, triaged_at="2026-10-03")    # ...then the app scored it again
+    c.post(f"/api/runs/{rid}/stop", headers=H)
+    runs.wait(rid)
+    assert [x["id"] for x in c.get(f"/api/runs/{rid}", headers=H).json()["results"]] == ["j1"]
+
+
 def test_confirmed_facts(env):
     c, impact = env["client"], env["impact"]
     v = c.get("/api/impact-record", headers=H).json()["version"]

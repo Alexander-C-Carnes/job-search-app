@@ -967,7 +967,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     # A run works in a separate process, so what it produced is found by comparing each job's
     # scoring and tailoring fields before it started with the same fields once it has ended.
     # Both are saved with the run, so a finished run's results survive a restart. Runs can overlap,
-    # so a changed job counts only if this run was the last to change it (its `last_run`).
+    # so a changed job counts only if this run was the last to change it (its `last_run`); a job
+    # scored in the app while a run was going is the app's change, not the run's.
 
     def marks_now() -> dict[str, str]:
         keys = ("triage", "triaged_at", "tailored_at", "run_dir", "report", "impact_score", "ats_total")
@@ -983,7 +984,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         before, state = run.marks, store.state()
         out = []
         for jid, mark in marks_now().items():
-            if before.get(jid) == mark or state.get(jid, {}).get("last_run", run.id) != run.id:
+            if before.get(jid) == mark or state.get(jid, {}).get("last_run") != run.id:
                 continue
             row = board.row(jid)
             if row:
