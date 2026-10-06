@@ -1,0 +1,238 @@
+/* Sorbet: candy brights, round shapes, chunky friendly type. The stage strip becomes a ribbon of
+   scoops sized by count; a sent application fires confetti; a rejection brings a round sad cat.
+   Everything here is scoped to html[data-theme="sorbet"] and only re-dresses app.css's elements. */
+
+@font-face { font-family: "Fredoka"; font-style: normal; font-weight: 300 700; font-display: swap;
+  src: url(../fonts/fredoka-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Nunito Sans"; font-style: normal; font-weight: 200 1000; font-display: swap;
+  src: url(../fonts/nunito-sans-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+html[data-theme="sorbet"] {
+  --paper: #FFF6F9; --panel: #FFFFFF; --panel-2: #FFF0F5; --ink: #2A1B3D; --muted: #5C4F6E; --faint: #8E7FA3;
+  --line: #F1DEE9; --edge: #D9C6D6; --accent: #FF3E7F; --link: #D81B5E; --sel: #FFE6EF; --star: #FF9F1C;
+  --good: #3E9A1A; --warn: #B45F00; --bad: #C5425D;
+  --add-bg: #E6F7D8; --add-ink: #2B6A0F; --del-bg: #FBE4EA; --del-ink: #8A2340;
+  --fit-hi-bg: #75CB33; --fit-hi: #2A1B3D; --fit-mid-bg: #FF9F1C; --fit-mid: #2A1B3D; --fit-lo-bg: #D9D0EA; --fit-lo: #2A1B3D;
+  --st-untracked: #B7AECB; --st-not-started: #A682E1; --st-in-progress: #E96500; --st-blocked: #CEAD59;
+  --st-applied: #75CB33; --st-done: #00A5E7; --st-denied: #C5617C; --st-not-applying: #7062A6;
+  --shadow: 0 1px 2px rgba(42, 27, 61, .06), 0 8px 24px rgba(42, 27, 61, .08);
+  --radius: 18px;
+  --display: "Fredoka", "Arial Rounded MT Bold", "Nunito Sans", system-ui, sans-serif;
+  --body: "Nunito Sans", "Avenir Next", "Helvetica Neue", system-ui, sans-serif;
+  color-scheme: light;
+}
+html[data-theme="sorbet"] body { font-family: var(--body); font-size: 14px; -webkit-font-smoothing: antialiased; }
+html[data-theme="sorbet"] :is(h1, h2, h3):not(.markdown *, .wysiwyg *, .doc-preview *, .posting-body *, .changes *) { font-family: var(--display); font-weight: 600; letter-spacing: -.01em; }
+html[data-theme="sorbet"] :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+html[data-theme="sorbet"] code, html[data-theme="sorbet"] kbd { font-size: 12px; }
+
+/* top bar: a pill for every tab */
+html[data-theme="sorbet"] .topbar { height: auto; min-height: 54px; flex-wrap: wrap; row-gap: 4px; padding-block: 6px; gap: 16px; border-bottom: 1px solid var(--line); background: var(--paper); }
+html[data-theme="sorbet"] .brand { font: 700 19px var(--display); }
+html[data-theme="sorbet"] .brand-mark { width: 18px; height: 18px; border-radius: 50%; background: conic-gradient(from 200deg, #FF3E7F 0 33%, #FF9F1C 33% 66%, #38B6FF 66%); }
+html[data-theme="sorbet"] .tabs { gap: 2px; align-self: center; flex-wrap: wrap; }
+html[data-theme="sorbet"] .tabs button { height: 32px; padding: 0 11px; border: 0; border-radius: 999px; font-weight: 600; font-size: 13.5px; color: var(--muted); }
+html[data-theme="sorbet"] .tabs button:hover { background: var(--sel); color: var(--ink); }
+html[data-theme="sorbet"] .tabs button.active { background: var(--ink); color: var(--paper); border-bottom-color: transparent; }
+html[data-theme="sorbet"] .count { background: var(--sel); color: var(--ink); font: 700 12px/18px var(--display); min-width: 20px; height: 18px; border-radius: 999px; }
+html[data-theme="sorbet"] .tabs button.active .count { background: var(--accent); color: var(--ink); }
+html[data-theme="sorbet"] .pill { border: 2px solid var(--line); background: var(--panel); font-weight: 600; }
+html[data-theme="sorbet"] .pill.live { border-color: var(--st-applied); color: var(--ink); }
+html[data-theme="sorbet"] .icon-btn:hover { background: var(--sel); }
+html[data-theme="sorbet"] .banner { background: #FFF1D6; color: #6B3E00; border-bottom-color: #F3D19C; }
+
+/* buttons, fields, segmented controls */
+html[data-theme="sorbet"] button.primary, html[data-theme="sorbet"] button.ghost, html[data-theme="sorbet"] .seg button {
+  border-radius: 999px; padding: 7px 14px; border: 2px solid var(--edge); background: var(--panel); font-weight: 700; transition: transform .12s ease, background-color .12s ease; }
+html[data-theme="sorbet"] button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+html[data-theme="sorbet"] button.primary:hover:not(:disabled) { opacity: 1; background: #3D2A57; border-color: #3D2A57; }
+html[data-theme="sorbet"] button.ghost:hover:not(:disabled) { background: var(--sel); border-color: var(--ink); }
+html[data-theme="sorbet"] button.primary:active, html[data-theme="sorbet"] button.ghost:active { transform: scale(.97); }
+html[data-theme="sorbet"] button.small { padding: 4px 11px; font-size: 12.5px; }
+html[data-theme="sorbet"] button.danger { color: var(--bad); }
+html[data-theme="sorbet"] .seg { border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; }
+html[data-theme="sorbet"] .seg button { border: 0; border-radius: 0; margin-left: 0; padding: 6px 14px; color: var(--ink); background: var(--panel); }
+html[data-theme="sorbet"] .seg button.active { background: var(--ink); color: var(--paper); }
+html[data-theme="sorbet"] :is(input[type=search], input[type=text], input[type=number], input[type=url], input[type=email], input[type=tel], input:not([type]), textarea, select) {
+  border: 2px solid var(--edge); border-radius: 12px; padding: 7px 10px; }
+html[data-theme="sorbet"] :is(input, textarea, select):focus { border-color: var(--accent); outline: none; }
+html[data-theme="sorbet"] .searchbox input { border-radius: 999px; padding: 8px 40px 8px 16px; }
+html[data-theme="sorbet"] .searchbox kbd { border: 1.5px solid var(--edge); border-radius: 6px; font-weight: 700; color: var(--muted); background: var(--panel); }
+html[data-theme="sorbet"] .link-btn { color: var(--link); font-weight: 600; }
+
+/* tools row and chips */
+html[data-theme="sorbet"] .jobs-tools { background: var(--paper); border-bottom: 0; padding: 12px 20px 8px; gap: 8px; }
+html[data-theme="sorbet"] .jobs-tools .tools-row:nth-child(2) { flex-wrap: wrap; gap: 10px 14px; }
+html[data-theme="sorbet"] .chip { border: 2px solid var(--edge); border-radius: 999px; padding: 5px 12px; font-weight: 600; color: var(--ink); background: var(--panel); }
+html[data-theme="sorbet"] .chip:hover { border-color: var(--ink); }
+html[data-theme="sorbet"] .chip b { font: 700 12.5px var(--display); color: var(--muted); }
+html[data-theme="sorbet"] .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+html[data-theme="sorbet"] .chip[aria-pressed="true"] b { color: var(--paper); }
+html[data-theme="sorbet"] #find-seg b { font-family: var(--display); }
+
+/* the pipeline: a ribbon of scoops, the main line sized by count, the exits as small pills */
+html[data-theme="sorbet"] .stage-wrap { flex: 1 1 560px; min-width: 0; }
+html[data-theme="sorbet"] .stages { display: flex; align-items: center; background: none; border: 0; border-radius: 0; overflow: visible; padding: 3px 0 3px 3px; }
+html[data-theme="sorbet"] .stage { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+  height: 64px; padding: 2px 14px; border: 0; border-radius: 999px; background: var(--c); color: var(--ink); text-align: center;
+  box-shadow: 0 0 0 3px var(--paper); transition: transform .15s ease, box-shadow .15s ease, flex-grow .3s ease; }
+html[data-theme="sorbet"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 104px; }
+html[data-theme="sorbet"] .stage[data-stage="Not started"] { order: 1; z-index: 4; }
+html[data-theme="sorbet"] .stage[data-stage="In progress"] { order: 2; z-index: 3; }
+html[data-theme="sorbet"] .stage[data-stage="Applied"] { order: 3; z-index: 2; }
+html[data-theme="sorbet"] .stage[data-stage="Done"] { order: 4; z-index: 1; }
+html[data-theme="sorbet"] .stage[data-stage="Blocked"] { order: 5; margin-left: 18px; }
+html[data-theme="sorbet"] .stage[data-stage="Denied"] { order: 6; }
+html[data-theme="sorbet"] .stage[data-stage="Not Applying"] { order: 7; }
+html[data-theme="sorbet"] .stage[data-kind="path"]:not([data-stage="Not started"]) { margin-left: -22px; padding-left: 30px; }
+html[data-theme="sorbet"] .stage[data-kind="side"] { flex: 0 0 auto; height: 54px; min-width: 78px; padding: 0 12px; margin-left: 8px; }
+html[data-theme="sorbet"] .stage:hover { background: var(--c); transform: translateY(-2px); z-index: 6; }
+html[data-theme="sorbet"] .stage[aria-pressed="true"] { background: var(--c); box-shadow: 0 0 0 3px var(--paper), 0 0 0 6px var(--accent); z-index: 6; }
+html[data-theme="sorbet"] .stage .n { font: 700 26px/1 var(--display); color: inherit; }
+html[data-theme="sorbet"] .stage .l { font-size: 12px; font-weight: 700; color: inherit; opacity: .9; }
+html[data-theme="sorbet"] .stage[data-kind="side"] .n { font-size: 20px; }
+html[data-theme="sorbet"] .stage[data-kind="side"] .l { font-size: 11px; }
+html[data-theme="sorbet"] .stage[aria-pressed="true"] .n, html[data-theme="sorbet"] .stage[aria-pressed="true"] .l { color: inherit; }
+html[data-theme="sorbet"] .stage[data-stage="Denied"], html[data-theme="sorbet"] .stage[data-stage="Not Applying"] { color: var(--paper); }
+html[data-theme="sorbet"] .stage-meter { display: none; }
+
+/* the list */
+html[data-theme="sorbet"] .joblist { border-right: 0; background: var(--paper); }
+html[data-theme="sorbet"] .list-head { border-bottom: 0; padding: 6px 14px; }
+html[data-theme="sorbet"] .batch { border-radius: 14px; margin: 0 10px 4px; border: 0; background: var(--sel); }
+html[data-theme="sorbet"] .jobs { padding: 0 8px 8px; }
+html[data-theme="sorbet"] .jobs li { grid-template-columns: 15px 40px minmax(0, 1fr) auto; gap: 10px; padding: 10px 10px; margin: 2px 0;
+  border: 0; border-radius: 14px; background: var(--panel); }
+html[data-theme="sorbet"] .jobs li:hover { background: var(--sel); }
+html[data-theme="sorbet"] .jobs li.selected { background: var(--sel); box-shadow: inset 0 0 0 2px var(--accent); }
+html[data-theme="sorbet"] .jobs li.group-head { background: var(--paper); border-radius: 0; margin: 0; }
+html[data-theme="sorbet"] .jobs li .pick { margin-top: 12px; accent-color: var(--accent); }
+html[data-theme="sorbet"] .t { font-weight: 700; font-size: 14px; }
+html[data-theme="sorbet"] .s { font-size: 13px; }
+html[data-theme="sorbet"] .list-empty { color: var(--muted); }
+
+/* fit badges: a solid scoop for the full score, a ring for the quick one */
+html[data-theme="sorbet"] .fit { --b: var(--line); width: 40px; height: 40px; border-radius: 50%; font: 700 17px var(--display); background: var(--panel); color: var(--ink); box-shadow: inset 0 0 0 3px var(--b); }
+html[data-theme="sorbet"] .fit.hi { --b: var(--st-applied); }
+html[data-theme="sorbet"] .fit.mid { --b: #FF9F1C; }
+html[data-theme="sorbet"] .fit.lo { --b: #D9D0EA; }
+html[data-theme="sorbet"] .fit.full { background: var(--b); box-shadow: none; }
+html[data-theme="sorbet"] .fit.big { width: 56px; height: 56px; font-size: 24px; }
+html[data-theme="sorbet"] .fit.huge { width: 84px; height: 84px; border-radius: 50%; font-size: 36px; box-shadow: inset 0 0 0 5px var(--b); }
+html[data-theme="sorbet"] .fit.huge.full { box-shadow: none; }
+html[data-theme="sorbet"] .kcard .fit { width: 32px; height: 32px; font-size: 14px; }
+html[data-theme="sorbet"] .run-results .fit { width: 30px; height: 30px; font-size: 13px; }
+
+/* tags */
+html[data-theme="sorbet"] .tag { border: 0; border-radius: 10px; background: #F6ECF3; color: var(--ink); font-weight: 600; line-height: 20px; padding: 0 8px; }
+html[data-theme="sorbet"] .stage-tag { background: color-mix(in srgb, var(--c) 26%, white); color: var(--ink); font-weight: 700; }
+html[data-theme="sorbet"] .stage-tag::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+html[data-theme="sorbet"] .tag.ok { background: color-mix(in srgb, var(--st-applied) 28%, white); color: var(--ink); }
+html[data-theme="sorbet"] .tag.ref { background: var(--sel); color: var(--link); }
+html[data-theme="sorbet"] .tag.warn-tag { background: #FBE9E0; color: #8A3B12; }
+html[data-theme="sorbet"] .tag.round-tag { background: color-mix(in srgb, var(--r) 18%, white); color: var(--ink); }
+html[data-theme="sorbet"] .tag.round-tag b { color: var(--muted); }
+html[data-theme="sorbet"] .ref-chip, html[data-theme="sorbet"] .status-select { border-radius: 999px; }
+
+/* the board */
+html[data-theme="sorbet"] .board { padding: 10px 20px 14px; }
+html[data-theme="sorbet"] .col { border: 1px solid color-mix(in srgb, var(--c) 30%, white); border-top: 0; background: color-mix(in srgb, var(--c) 10%, white); border-radius: 22px 22px 18px 18px; }
+html[data-theme="sorbet"] .col header { background: var(--c); color: var(--ink); border-radius: 22px 22px 0 0; padding: 10px 14px; font-size: 14px; }
+html[data-theme="sorbet"] .col[data-stage="Denied"] header, html[data-theme="sorbet"] .col[data-stage="Not Applying"] header { color: var(--paper); }
+html[data-theme="sorbet"] .col header .dot { display: none; }
+html[data-theme="sorbet"] .col header .n { font: 700 18px var(--display); color: inherit; }
+html[data-theme="sorbet"] .col.over { outline: 3px dashed var(--accent); outline-offset: -3px; background: color-mix(in srgb, var(--c) 18%, white); }
+html[data-theme="sorbet"] .col-empty { border: 2px dashed color-mix(in srgb, var(--c) 40%, white); border-radius: 12px; margin: 4px 2px; }
+html[data-theme="sorbet"] .kcard { border-radius: 14px; padding: 10px 6px 10px 10px; }
+html[data-theme="sorbet"] .kcard:hover { border-color: var(--faint); }
+html[data-theme="sorbet"] .kcard.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* the detail */
+html[data-theme="sorbet"] .detail { background: var(--paper); }
+html[data-theme="sorbet"] .dhead { background: var(--panel); border-bottom: 0; border-radius: 18px 18px 0 0; margin: 0 20px 0 0; padding: 18px 22px 14px; }
+html[data-theme="sorbet"] .jobs-body.view-list .detail { padding-top: 6px; }
+html[data-theme="sorbet"] .dhead h2 { font-size: 24px; }
+html[data-theme="sorbet"] .dhead .sub { font-size: 13px; }
+html[data-theme="sorbet"] .status-select { border: 0; font-weight: 700; color: var(--ink); background: color-mix(in srgb, var(--c) 26%, white); padding: 7px 32px 7px 14px;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%232A1B3D' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 10px 6px; }
+html[data-theme="sorbet"] .status-select:focus { box-shadow: 0 0 0 3px var(--accent); }
+html[data-theme="sorbet"] .subtabs { background: var(--panel); border-bottom: 1px solid var(--line); margin-right: 20px; }
+html[data-theme="sorbet"] .subtabs button { font-weight: 600; color: var(--muted); }
+html[data-theme="sorbet"] .subtabs button.active { color: var(--ink); border-bottom: 3px solid var(--accent); }
+html[data-theme="sorbet"] .subpanel { background: var(--panel); margin: 0 20px 14px 0; border-radius: 0 0 18px 18px; overflow: hidden; }
+html[data-theme="sorbet"] .jobs-body.view-board .dhead, html[data-theme="sorbet"] .jobs-body.view-board .subtabs, html[data-theme="sorbet"] .jobs-body.view-board .subpanel { margin-right: 0; border-radius: 0; }
+html[data-theme="sorbet"] .score b { font-family: var(--display); font-size: 14px; }
+html[data-theme="sorbet"] .posting-pane { border-right-color: var(--line); }
+html[data-theme="sorbet"] .posting-body { font-size: 14.5px; }
+html[data-theme="sorbet"] .card, html[data-theme="sorbet"] .notice, html[data-theme="sorbet"] .pcard, html[data-theme="sorbet"] .scard, html[data-theme="sorbet"] .look-option { border-radius: 18px; }
+html[data-theme="sorbet"] .notice { background: var(--panel-2); border: 2px dashed var(--edge); }
+html[data-theme="sorbet"] .card.is-good { border-top: 4px solid var(--st-applied); }
+html[data-theme="sorbet"] .card.is-warn { border-top: 4px solid #FF9F1C; }
+html[data-theme="sorbet"] .band { font-family: var(--display); font-weight: 600; }
+html[data-theme="sorbet"] .pdfbar { background: var(--panel-2); }
+html[data-theme="sorbet"] .pdfpane iframe { background: #E9DEE8; }
+html[data-theme="sorbet"] .diff { border-radius: 12px; }
+html[data-theme="sorbet"] .history .v { font-family: var(--display); }
+
+/* the stage path and the résumé meters */
+html[data-theme="sorbet"] .path-line { max-width: 560px; }
+html[data-theme="sorbet"] .path-line::before { top: 15px; height: 6px; border-radius: 3px; }
+html[data-theme="sorbet"] .path-line .dot { width: 32px; height: 32px; box-shadow: inset 0 0 0 3px var(--line); }
+html[data-theme="sorbet"] .path-line .step.current .dot { box-shadow: 0 0 0 3px var(--panel), 0 0 0 6px var(--ink); display: grid; place-items: center; }
+html[data-theme="sorbet"] .path-line .step.current .dot::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); }
+html[data-theme="sorbet"] .path-line .step.current[data-stage="Denied"] .dot::after, html[data-theme="sorbet"] .path-line .step.current[data-stage="Not Applying"] .dot::after { background: var(--paper); }
+html[data-theme="sorbet"] .path-line .step-name { font-size: 12px; }
+html[data-theme="sorbet"] .xstep i { width: 16px; height: 16px; }
+html[data-theme="sorbet"] .xstep.taken i { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--ink); }
+html[data-theme="sorbet"] .meter { font-size: 13px; }
+html[data-theme="sorbet"] .meter.hi { --c: var(--st-applied); }
+html[data-theme="sorbet"] .meter.mid { --c: #FF9F1C; }
+html[data-theme="sorbet"] .meter.lo { --c: var(--st-denied); }
+html[data-theme="sorbet"] .meter .val { font: 600 18px var(--display); }
+html[data-theme="sorbet"] .meter .track { height: 10px; border-radius: 5px; background: var(--line); }
+html[data-theme="sorbet"] .meter .track i { border-radius: 5px; }
+html[data-theme="sorbet"] .pass { color: var(--good); }
+
+/* toasts and the moments */
+html[data-theme="sorbet"] .toast { background: var(--panel); color: var(--ink); border: 2px solid var(--accent); border-radius: 999px; padding: 9px 16px; font-weight: 700; }
+html[data-theme="sorbet"] .toast.error { border-color: var(--bad); color: var(--bad); background: var(--panel); }
+html[data-theme="sorbet"] .moment-banner { background: var(--st-applied); color: var(--ink); border-radius: 999px; padding: 14px 26px; font: 600 20px var(--display);
+  box-shadow: 0 0 0 4px var(--paper), 0 0 0 7px var(--st-applied); }
+html[data-theme="sorbet"] .moment-banner.done { background: var(--st-done); box-shadow: 0 0 0 4px var(--paper), 0 0 0 7px var(--st-done); }
+html[data-theme="sorbet"] .cat-card { border: 2px solid var(--st-denied); border-radius: 28px; padding: 16px 18px; }
+html[data-theme="sorbet"] .cat-card p { font-size: 15px; }
+html[data-theme="sorbet"] .cat-card b { font: 600 18px var(--display); }
+
+/* dialogs, pages, runs, documents, profile */
+html[data-theme="sorbet"] dialog { border: 0; border-radius: 24px; padding: 22px 24px; }
+html[data-theme="sorbet"] dialog::backdrop { background: rgba(42, 27, 61, .35); }
+html[data-theme="sorbet"] dialog h2 { font-size: 20px; }
+html[data-theme="sorbet"] .page-head h1, html[data-theme="sorbet"] .page h1 { font-size: 24px; }
+html[data-theme="sorbet"] .scard { border-left-width: 1px; }
+html[data-theme="sorbet"] .scard.picked { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+html[data-theme="sorbet"] .run-bar { background: var(--paper); border-top: 1px solid var(--line); }
+html[data-theme="sorbet"] .runs li.selected, html[data-theme="sorbet"] .doc-outline button:hover { background: var(--sel); border-left-color: var(--accent); }
+html[data-theme="sorbet"] .runs .st.running { color: var(--link); }
+html[data-theme="sorbet"] .doc-head { background: var(--paper); }
+html[data-theme="sorbet"] .doc-conflict { background: #FBE4EA; color: #8A2340; }
+html[data-theme="sorbet"] .pcard h2 { font-size: 17px; }
+html[data-theme="sorbet"] .look-option[aria-checked="true"] { border: 2px solid var(--accent); box-shadow: none; }
+html[data-theme="sorbet"] .look-name { font-family: var(--display); font-weight: 600; font-size: 15px; }
+html[data-theme="sorbet"] .startups-body .round-tile { border-radius: 50%; font-family: var(--display); }
+html[data-theme="sorbet"] .startups-body .detail .pad { background: var(--panel); }
+
+@media (max-width: 1100px) {
+  html[data-theme="sorbet"] .stage { height: 56px; padding: 2px 10px; }
+  html[data-theme="sorbet"] .stage .n { font-size: 22px; }
+  html[data-theme="sorbet"] .stage[data-kind="path"] { min-width: 92px; }
+}
+@media (max-width: 760px) {
+  html[data-theme="sorbet"] .stages { flex-wrap: wrap; gap: 8px; }
+  html[data-theme="sorbet"] .stage[data-kind="path"] { flex: 1 1 42%; margin-left: 0; padding-left: 14px; }
+  html[data-theme="sorbet"] .stage[data-kind="path"]:not([data-stage="Not started"]) { margin-left: 0; padding-left: 14px; }
+  html[data-theme="sorbet"] .stage[data-kind="side"] { flex: 1 1 28%; margin-left: 0; }
+}

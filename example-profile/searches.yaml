@@ -1,0 +1,183 @@
+# Your profile's settings: who you are, your saved job searches, and how the app runs.
+# It lives in your profile folder (~/JobSearch unless $JOBPIPE_HOME says otherwise), out of git.
+#
+# Credits: JobsPipe charges 1 credit per job returned, once per calendar month
+# (re-seeing a job you already paid for this month is free). So `limit` is the
+# spend cap for each search, and `budget` caps a whole run. Filters are applied by
+# JobsPipe *before* you pay, so keep them tight; the local post-filters below
+# only drop jobs you have already paid for.
+#
+# Field names sent to POST /v1/jobs/search:
+#   titles              -> job_title_or           (any of these phrases in the title)
+#   exclude_titles      -> job_title_not
+#   country             -> job_country_code_or
+#   posted_within_days  -> posted_at_max_age_days
+#   remote: true        -> remote
+#   work_arrangement    -> work_arrangement_or    (e.g. hybrid)
+#   locations           -> job_location_or
+#   min_salary_usd      -> min_salary_usd
+#   seniority           -> job_seniority_or
+#   api_filters         -> sent verbatim, for any other API field
+# `work_arrangement_or`, `job_location_or` and `min_salary_usd` come from the
+# JobsPipe integration code, not the Python SDK. Run `python -m jobpipe preflight`
+# once (at most 1 credit per search) to confirm the API accepts them.
+
+candidate:
+  # Who the résumés are for. The prompts, the PDF file names and check_resume.py all read this.
+  # Edit it on the app's Profile tab, or here.
+  example: true                    # a made-up candidate, so the app works before you set it up
+  name: Jordan Rivera
+  pronouns: they/them              # he/him, she/her or they/them
+  # The contact line every résumé must carry. check_resume.py fails one without the city
+  # and a visible linkedin.com/in/ URL.
+  city: Portland, OR
+  phone: +1 555-010-0199
+  email: jordan.rivera@example.com
+  linkedin: linkedin.com/in/jordan-rivera-example
+  # PDFs are named <pdf_prefix>-<Company>-<Title>.pdf (default: the name with dashes, then -Resume).
+  pdf_prefix: Jordan-Rivera-Resume
+  # Your existing résumés in references/, scored alongside the impact record:
+  # a source name (a heat-map column) -> file name. The first is the fallback base résumé.
+  resumes:
+    Platform resume: resume-platform.md
+  # How the quick triage prompt describes your evidence, if your impact record has parts to point at.
+  evidence: the impact record, including every user-confirmed note, plus the resume variants
+  # Figures your impact record withdrew or corrected; a résumé that shows one fails the check.
+  withdrawn: []
+
+defaults:
+  country: US
+  posted_within_days: 7
+  min_salary_usd: 200000
+  limit: 10
+  exclude_titles: [Intern, Internship, Contract, Contractor]
+
+budget:
+  max_credits_per_run: 40
+  # Free plan: 1,000 credits once, never refilled (period: once).
+  # On a paid plan set amount to the plan's credits and period: monthly.
+  allowance: {amount: 1000, period: once}
+
+pipeline:
+  # Triage every new job with a quick 1-10 fit score, then run the full
+  # resume-job-fit pipeline (3 analysts, matcher, 3 writers, merge, PDF, report)
+  # on the best ones.
+  shortlist_min_fit: 7
+  tailor_top: 3
+  # Salary floor enforced locally too. Jobs that do not state pay are kept and
+  # flagged, since JobsPipe may still have matched them on a parsed salary.
+  enforce_min_salary: true
+
+notion:
+  # Copy tracked jobs to a Notion database (README: "Set up the Notion tracker"). Off until you set it up;
+  # the tracker works on your Mac without it.
+  enabled: false
+  data_source_id: ""
+  # The page the Project relation points to (optional).
+  project_page_id: ""
+  # New jobs from searches wait in the app's "Find jobs" list until you click Track
+  # (or tailor a résumé, which tracks the job as In progress). To have searches add
+  # every job at or above a fit score to Notion automatically, set a number, e.g. 7.
+  log_triaged_min_fit: null
+
+models:
+  # Which AI does the work (the app's Profile tab sets all of this). backend: claude-code runs every
+  # step through the Claude Code CLI (`claude -p`), which uses your Claude subscription (Pro/Max): no
+  # API credits. Log in once by running `claude`. Or pay per call: api (Claude, ANTHROPIC_API_KEY),
+  # openai (OPENAI_API_KEY), gemini (GEMINI_API_KEY), openrouter (OPENROUTER_API_KEY); or run a model
+  # on this Mac for free: ollama, lmstudio. openai-compatible needs base_url. See README: Which AI.
+  backend: claude-code
+  # claude_bin: /path/to/claude    # only if `claude` isn't on PATH
+  # The model for each step, by the provider's name for it. Effort (low, medium, high) trades depth for usage.
+  triage: {model: claude-opus-5-5, effort: low}
+  analysis: {model: claude-opus-5-5, effort: medium}
+  writer: {model: claude-opus-5-5, effort: high}
+  # Server-side refusal fallback (backend: api only; set false on Bedrock/Vertex).
+  fallbacks: true
+
+evidence:
+  # Small Hugging Face models that run on this Mac (downloaded once, about 4 GB, to ~/.cache/huggingface) and
+  # check the tailored resume against your evidence: which missing posting keywords your record supports (they
+  # go to the keyword-restore pass and the report), and whether each resume line is backed by the evidence it
+  # cites. The embedding model finds evidence, the reranker judges keywords, the verifier (an NLI model) judges
+  # lines. With enabled: false, or without the packages, the pipeline runs as before; the check that every
+  # figure in the resume appears in your evidence needs no model and always runs.
+  enabled: true
+  embedding_model: Qwen/Qwen3-Embedding-0.6B
+  reranker_model: Qwen/Qwen3-Reranker-0.6B
+  verifier_model: MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli
+  # device: mps                 # default: the Mac's GPU when available, else the CPU
+
+startups:
+  # The Startups tab: startups that just raised a round, and YC companies that say they're hiring. All free.
+  # Refresh reads these sources into your profile's data/startups.json; a startup's open roles come from its own careers
+  # board (Greenhouse, Lever or Ashby), so none of this spends JobsPipe credits.
+  days: 90                      # a raise within this many days counts
+  # Funding-news feeds (name: RSS URL) on top of the Google News searches below. Add e.g.
+  # "Tech.eu: https://tech.eu/feed/" for Europe or "BetaKit: https://betakit.com/feed/" for Canada.
+  feeds:
+    FinSMEs: https://www.finsmes.com/feed
+    TechCrunch: https://techcrunch.com/category/venture/feed/
+    Crunchbase News: https://news.crunchbase.com/feed/
+    AlleyWatch: https://www.alleywatch.com/category/funding/feed/
+  # Google News searches; each returns the last ~100 matching headlines.
+  news_queries: ['"raises" "Series A"', '"raises" "Series B"', '"raises" "Series C"', '"raises" "seed round"', '"raises" "pre-seed"', '"raises" "Series D"']
+  yc:
+    hiring_only: true           # only YC companies whose directory entry says they're hiring
+    batches: []                 # e.g. ["Summer 2026", "Fall 2026"]; empty = every batch
+    industries: []              # e.g. ["B2B", "Infrastructure"]; empty = all
+    regions: ["United States of America", "Remote"]
+  # VC portfolio job boards (firm: board URL). Each is searched for your filters' titles; the companies hiring
+  # for them are added with their stage and those roles. Only boards run by Getro work (most jobs.<firm>.com do).
+  vc_boards:
+    General Catalyst: https://jobs.generalcatalyst.com
+    Techstars: https://jobs.techstars.com
+    Accel: https://jobs.accel.com
+    Insight Partners: https://jobs.insightpartners.com
+    Khosla Ventures: https://jobs.khoslaventures.com
+  # Keep only startups whose description or tags mention one of these words; empty = keep every one.
+  keywords: []
+  # Every refresh also reads the startups' careers boards (Greenhouse, Lever or Ashby), newest raise first, and adds the
+  # roles that answer your filters (title, and remote or one of the filter's locations) to Find jobs, with the round.
+  # A board is re-read after a day; a site with no board is looked at again after two weeks.
+  roles:
+    auto: true
+    max_per_refresh: 300        # startups per refresh
+    # A role is skipped when its title puts it in sales, pre-sales, support or partner work ("Solutions Engineering
+    # Manager", "Sales Program Manager", "Technical Program Manager, Field") or at a junior level ("Associate").
+    # Add words of your own here; a title containing one is skipped too.
+    exclude_titles: []
+    # Score each new startup role against your impact record as it arrives (one short Claude call each, on your
+    # subscription), so Find jobs' Fit 7+ filter sorts them by your experience. Off: score them from Find jobs when
+    # you want ("Signal-score N unscored"). At most score_per_refresh a refresh.
+    signal_score: false
+    score_per_refresh: 30
+  # While the app is open, refresh the sources on its own this often (hours). 0 = only when you click.
+  auto_refresh_hours: 24
+  # Each refresh also re-checks that the roles in Find jobs are still open (their page, or their applicant-tracking
+  # system); a closed one moves to Dismissed, tagged Closed. `python -m jobpipe check-postings` does it alone.
+  check_postings: true
+  enrich:
+    # On each refresh, look up the round of up to N startups whose round is still unknown (newest first).
+    # Needs FUNDABLE_API_KEY, THEIRSTACK_API_KEY or PDL_API_KEY in your profile's .env; all have free allowances. 0 = only when you click.
+    per_refresh: 0
+
+searches:
+  - id: tpm-remote
+    name: TPM, remote, $200k+
+    titles: ["Technical Program Manager", "Principal Program Manager", "Program Manager, Technical"]
+    remote: true
+  - id: em-remote
+    name: Engineering Manager, remote, $200k+
+    titles: ["Engineering Manager", "Manager, Engineering", "Manager, Software Engineering"]
+    remote: true
+  - id: tpm-hybrid
+    name: TPM, hybrid (Portland), $200k+
+    titles: ["Technical Program Manager", "Principal Program Manager", "Program Manager, Technical"]
+    work_arrangement: ["hybrid"]
+    locations: ["Portland"]
+  - id: em-hybrid
+    name: Engineering Manager, hybrid (Portland), $200k+
+    titles: ["Engineering Manager", "Manager, Engineering", "Manager, Software Engineering"]
+    work_arrangement: ["hybrid"]
+    locations: ["Portland"]

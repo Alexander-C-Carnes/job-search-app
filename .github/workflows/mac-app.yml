@@ -1,0 +1,93 @@
+# Builds the Mac app (mac/build.sh) for Apple silicon and Intel and attaches the DMGs to a GitHub Release.
+# Push a tag to release:  git tag v0.2.0 && git push origin v0.2.0
+#
+# Signing is optional. Without these secrets the DMGs are ad-hoc signed and people allow the app once in
+# System Settings > Privacy & Security. With them, the app is signed with a Developer ID and notarized:
+#   MAC_CERT_P12          base64 of a "Developer ID Application" certificate exported as .p12
+#   MAC_CERT_PASSWORD     that .p12's password
+#   NOTARY_KEY_P8         base64 of an App Store Connect API key (.p8) with Developer access
+#   NOTARY_KEY_ID         its key ID
+#   NOTARY_ISSUER         its issuer ID
+name: Mac app
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Signing certificate
+        id: cert
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MAC_CERT_P12" ]; then echo "sign=" >> "$GITHUB_OUTPUT"; exit 0; fi
+          KC="$RUNNER_TEMP/build.keychain-db"; PW=$(uuidgen)
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$PW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$PW" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$PW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          echo "sign=1" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          case "$VERSION" in [0-9]*) ;; *) VERSION=0.0.0-dev ;; esac
+          ARGS=(--version "$VERSION" --repo "$GITHUB_REPOSITORY" --arch "${{ matrix.arch }}")
+          if [ -z "${{ steps.cert.outputs.sign }}" ]; then
+            ARGS+=(--no-sign)
+          elif [ -n "$NOTARY_KEY_P8" ]; then
+            echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            export NOTARY_KEY="$RUNNER_TEMP/notary.p8"
+            ARGS+=(--notarize)
+          fi
+          mac/build.sh "${ARGS[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: build/Job-Search-*.dmg
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dmgs
+          merge-multiple: true
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "Job Search ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dmgs/*.dmg -R "$GITHUB_REPOSITORY" --clobber

@@ -1,0 +1,1050 @@
+"""The local web app: auth, job board + Notion, résumé edit loop, searches, runs, notes."""
+import json
+import shutil
+import sys
+import threading
+from urllib.parse import quote
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from jobpipe import config, render
+from jobpipe.llm import AgentResult
+from jobpipe.notion import NotionTracker
+from jobpipe.store import Store
+from jobpipe.web.runs import RunManager
+from jobpipe.web.server import create_app
+from conftest import BASE, TITLE, FakeNotion, FakeRunner, _resume, make_job, notion_row
+
+TOKEN = "test-token"
+H = {"X-Jobpipe-Token": TOKEN}
+JOB_URL = "https://boards.greenhouse.io/acme/jobs/j1"
+
+
+class EditRunner:
+    """Claude in the résumé chat: a message ending in "?" gets an answer and no edit; anything else an edit."""
+    def __init__(self, reply=None):
+        self.calls = []
+        self.reply = reply
+        self.pipeline = FakeRunner()    # triage and the tailoring stages
+
+    async def run(self, call):
+        self.calls.append(call)
+        if call.label != "resume-edit":
+            return await self.pipeline.run(call)
+        if call.tail.split("new message:\n", 1)[1].split("\n")[0].endswith("?"):
+            return AgentResult(files={"reply.md": "The summary is the weakest part; want me to tighten it?"}, summary="")
+        md = self.reply or _resume().replace("Technical Program Manager with 9+ years",
+                                             "Technical Program Manager with 9+ years, reliability first,")
+        return AgentResult(files={"resume-edited.md": md, "reply.md": "- Summary: added reliability focus (E1)."},
+                           summary="ok")
+
+
+@pytest.fixture
+def env(tmp_dirs, tmp_path):
+    store = Store()
+    job = make_job("j1")
+    store.save_job(job, "tpm-remote")
+    store.save_job(make_job("j2", company="Beta"), "tpm-remote")
+    out = tmp_path / "outputs" / "2026-10-01"
+    run_dir = out / "runs" / "acme-j1"
+    run_dir.mkdir(parents=True)
+    md = _resume()
+    (run_dir / "resume-final.md").write_text(md)
+    (run_dir / "01-objectives.md").write_text(f"# Role\n\n## Exact job title\n{TITLE}\n\n## Job summary\nx\n")
+    (run_dir / "jd.md").write_text("ATS: Greenhouse\nSource: x\n\nposting")
+    (run_dir / "04-match.md").write_text("# Match\n## Evidence ledger\nE1 ...\n")
+    (run_dir / "keywords.json").write_text(json.dumps({"TPM": "technical program manag", "reliability": "reliab"}))
+    report = out / "report-Acme.md"
+    report.write_text("# Report\n\n<script>alert(1)</script>\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+    pdf = out / f"Jordan-Rivera-Resume-Acme-{TITLE.replace(' ', '-')}.pdf"
+    render.render_pdf(md, pdf)
+    store.update("j1", run_dir=str(run_dir), pdf=str(pdf), report=str(report), tailored_at="2026-10-01",
+                 impact_score=8.0, resume_score=8.0, ats_total=83.0, exact_title=TITLE,
+                 triage={"fit_score": 8, "one_line": "good", "band_reason": "b", "level_match": "match",
+                         "hard_requirement_issues": [], "strongest_matches": ["m"], "likely_gaps": [],
+                         "recommended_base": "x", "role_family": "TPM"})
+    store.update("j2", triage={"fit_score": 5, "one_line": "meh"})
+    notion = FakeNotion([notion_row("p1", JOB_URL, status="Not started", fit=8),
+                         {**notion_row("p9", "https://example.com/other", status="Applied"), "properties": {
+                             **notion_row("p9", "https://example.com/other", status="Applied")["properties"],
+                             "Name": {"title": [{"plain_text": "Manual job — Zeta"}]},
+                             "Company": {"rich_text": [{"plain_text": "Zeta"}]}}}])
+    tracker = NotionTracker("ds", "proj", token="t", client=httpx.Client(transport=httpx.MockTransport(notion)))
+    searches = tmp_path / "searches.yaml"
+    shutil.copy(config.EXAMPLE_PROFILE / "searches.yaml", searches)
+    runner = EditRunner()
+    runs = RunManager(argv_prefix=[sys.executable, "-c", "import sys; print('args', sys.argv[1:]); print('done')"],
+                      db=tmp_path / "runs.db")
+    cfg = config.load(searches)
+    impact = tmp_path / "impact-record.md"
+    impact.write_text("# Impact record\n\n## Northwind\n\nLed 22 teams.\n")
+    app = create_app(cfg, token=TOKEN, store=store, tracker=tracker,
+                     runner_factory=lambda cfg: runner, runs=runs, allowed_hosts={"testserver"},
+                     searches_path=searches, notes_path=tmp_path / "user-notes.md", resume_root=tmp_path / "repo",
+                     impact_path=impact)
+    return {"client": TestClient(app), "app": app, "cfg": cfg, "notion": notion, "tracker": tracker, "runner": runner, "runs": runs, "pdf": pdf,
+            "run_dir": run_dir, "searches": searches, "notes": tmp_path / "user-notes.md", "impact": impact, "store": store}
+
+
+def test_auth_and_host_guard(env):
+    c = env["client"]
+    assert c.get("/api/summary").status_code == 401
+    assert c.get("/api/summary", headers={"X-Jobpipe-Token": "nope"}).status_code == 401
+    assert c.get("/api/summary", headers={**H, "host": "evil.example"}).status_code == 403
+    r = c.get("/")
+    assert r.status_code == 200 and "script-src 'self'" in r.headers["content-security-policy"]
+    assert c.get("/api/summary", headers=H).json()["credits"]["allowance"] == 1000
+    # file links may carry the token as ?t= (GET only)
+    assert c.get(f"/api/jobs/j1/resume/1.pdf?t={TOKEN}").status_code == 200
+    assert c.post(f"/api/notes?t={TOKEN}", json={"text": "x"}).status_code == 401
+
+
+def test_job_board_merges_local_jobs_and_notion(env):
+    jobs = env["client"].get("/api/jobs", headers=H).json()["jobs"]
+    by_id = {j["id"]: j for j in jobs}
+    assert by_id["j1"]["status"] == "Not started" and by_id["j1"]["notion_page_id"] == "p1"
+    assert by_id["j1"]["tailored"] and by_id["j1"]["ats_total"] == 83.0
+    assert by_id["j2"]["notion_page_id"] is None and not by_id["j2"]["tailored"]
+    notion_only = by_id["notion-p9"]
+    assert notion_only["title"] == "Manual job" and notion_only["company"] == "Zeta" and notion_only["status"] == "Applied" and not notion_only["local"]
+    assert [j["id"] for j in jobs][0] == "j1"  # highest fit first
+    # "remote" means fully remote: a hybrid listing isn't, and a Notion-only row is unknown
+    Store().save_job(make_job("j3", remote=True, hybrid=True), "tpm-hybrid")
+    Store().save_job(make_job("j4", remote=False, hybrid=True, work_arrangement="hybrid"), "tpm-hybrid")
+    by_id = {j["id"]: j for j in env["client"].get("/api/jobs", headers=H).json()["jobs"]}
+    assert [by_id[k]["remote"] for k in ("j1", "j3", "j4", "notion-p9")] == [True, False, False, False]
+
+
+def test_status_change_is_saved_locally_then_sent_to_notion(env, monkeypatch):
+    c, notion = env["client"], env["notion"]
+    j1 = lambda q="": {j["id"]: j for j in c.get("/api/jobs" + q, headers=H).json()["jobs"]}["j1"]
+    assert j1()["tracker_id"] == "p1" and j1()["notion_page_id"] == "p1"
+    assert c.post("/api/tracker/p1/status", headers=H, json={"status": "Applied"}).json() == {"ok": True}
+    assert j1()["status"] == "Applied"                                   # shown at once, from the local tracker
+    assert j1("?wait=1")["pending"] is False                             # the background sync has sent it
+    assert notion.rows["p1"]["properties"]["Status"]["status"]["name"] == "Applied"
+    assert c.post("/api/notion/p1/status", headers=H, json={"status": "Bogus"}).status_code == 400   # the old path still works
+    assert c.post("/api/tracker/nope/status", headers=H, json={"status": "Done"}).status_code == 404
+
+    # Notion down: the change is kept, shown, and flagged as waiting
+    def down(*a, **k):
+        raise RuntimeError("Notion's servers returned an error (500: Cross-cell memcached access is not allowed).")
+    monkeypatch.setattr(env["tracker"], "set_status", down)
+    assert c.post("/api/tracker/p1/status", headers=H, json={"status": "Blocked"}).json() == {"ok": True}
+    d = c.get("/api/jobs?wait=1", headers=H).json()
+    row = {j["id"]: j for j in d["jobs"]}["j1"]
+    assert row["status"] == "Blocked" and row["pending"] is True and d["pending"] == 1 and "Cross-cell" in d["notion_error"]
+    assert notion.rows["p1"]["properties"]["Status"]["status"]["name"] == "Applied"
+    # Notion back: the next sync sends it, and Notion's older value never overwrote the unsent one
+    monkeypatch.undo()
+    d = c.get("/api/jobs?refresh=1", headers=H).json()
+    assert d["pending"] == 0 and d["notion_error"] == "" and {j["id"]: j for j in d["jobs"]}["j1"]["status"] == "Blocked"
+    assert notion.rows["p1"]["properties"]["Status"]["status"]["name"] == "Blocked"
+
+
+def test_jobs_are_cached_and_notion_is_stale_while_revalidate(env, monkeypatch):
+    import threading
+    import time
+    c = env["client"]
+    r = c.get("/api/jobs", headers=H)
+    etag = r.headers["etag"]
+    assert r.json()["syncing"] is False and r.json()["notion_error"] == ""
+    assert c.get("/api/jobs", headers={**H, "If-None-Match": etag}).status_code == 304
+    # Notion changes behind the app's back; once the snapshot is over a minute old the next request
+    # still answers from it, flags the refresh, and ?wait=1 returns the fresh rows.
+    env["notion"].rows["p1"]["properties"]["Status"]["status"]["name"] = "Blocked"
+    real, gate, list_jobs = time.time, threading.Event(), env["tracker"].list_jobs
+    monkeypatch.setattr(time, "time", lambda: real() + 120)
+    monkeypatch.setattr(env["tracker"], "list_jobs", lambda: (gate.wait(5), list_jobs())[1])   # Notion is slow
+    stale = c.get("/api/jobs", headers=H).json()
+    assert stale["syncing"] is True and {j["id"]: j for j in stale["jobs"]}["j1"]["status"] == "Not started"
+    gate.set()
+    fresh = c.get("/api/jobs?wait=1", headers={**H, "If-None-Match": etag})
+    assert fresh.status_code == 200 and fresh.json()["syncing"] is False
+    assert {j["id"]: j for j in fresh.json()["jobs"]}["j1"]["status"] == "Blocked"
+    # the tracker is a local file, so a restart shows it without waiting for Notion
+    assert (config.DATA / "tracker.db").exists()
+    # Notion failing: Sync says so, and the list keeps the last synced rows with the reason and their age
+    def down():
+        raise RuntimeError("Notion's servers returned an error (500: Cross-cell memcached access is not allowed).")
+    monkeypatch.setattr(env["tracker"], "list_jobs", down)
+    r = c.get("/api/jobs?refresh=1", headers=H)
+    assert r.status_code == 502 and "Couldn't sync with Notion. Notion's servers returned an error" in r.json()["detail"]
+    kept = c.get("/api/jobs", headers=H).json()
+    assert {j["id"]: j for j in kept["jobs"]}["j1"]["status"] == "Blocked"
+    assert "Cross-cell" in kept["notion_error"] and kept["notion_synced"] and kept["syncing"] is False
+    # an edited job file is picked up without a restart
+    job = {**make_job("j2", company="Beta"), "job_title": "Renamed role"}
+    time.sleep(0.01)
+    (config.DATA / "jobs" / "j2.json").write_text(json.dumps(job))
+    assert {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}["j2"]["title"] == "Renamed role"
+
+
+def test_star_and_referral(env):
+    c = env["client"]
+    by_id = lambda: {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    assert by_id()["j2"]["starred"] is False and by_id()["j2"]["referral_url"] == ""
+    assert c.patch("/api/jobs/j2", headers=H, json={"starred": True}).json()["starred"] is True
+    r = c.patch("/api/jobs/j2", headers=H, json={"referral_url": "linkedin.com/in/jordan", "referral_name": " Jordan Lee "})
+    assert r.json() == {"id": "j2", "starred": True, "referral_url": "https://linkedin.com/in/jordan", "referral_name": "Jordan Lee"}
+    j2 = by_id()["j2"]
+    assert j2["starred"] and j2["referral_url"] == "https://linkedin.com/in/jordan" and j2["referral_name"] == "Jordan Lee"
+    assert json.loads((config.DATA / "marks.json").read_text())["j2"]["referral_name"] == "Jordan Lee"
+    for bad in ("javascript:alert(1)", "not a url", "ftp://x.example/y"):
+        assert c.patch("/api/jobs/j2", headers=H, json={"referral_url": bad}).status_code == 400
+    assert c.patch("/api/jobs/j2", headers=H, json={"referral_url": ""}).json()["referral_url"] == ""
+    assert c.patch("/api/jobs/j2", headers=H, json={"starred": False}).json()["starred"] is False
+    assert "j2" not in json.loads((config.DATA / "marks.json").read_text())
+    # jobs that are only in Notion can be marked too; unknown jobs can't
+    assert c.patch("/api/jobs/notion-p9", headers=H, json={"starred": True}).status_code == 200
+    assert by_id()["notion-p9"]["starred"] is True
+    assert c.patch("/api/jobs/nope", headers=H, json={"starred": True}).status_code == 404
+    assert c.patch("/api/jobs/j2", headers=H, json={}).status_code == 400
+    # a mark made on a job's Notion row follows the job once a search has stored it
+    (config.DATA / "marks.json").write_text(json.dumps({"notion-p1": {"starred": True}}))
+    assert by_id()["j1"]["starred"] is True
+    c.patch("/api/jobs/j1", headers=H, json={"referral_url": "https://example.com/refer"})
+    assert json.loads((config.DATA / "marks.json").read_text()) == {
+        "j1": {"starred": True, "referral_url": "https://example.com/refer"}}
+
+
+def test_score_experience_from_impact_record(env, monkeypatch):
+    c = env["client"]
+    # by default a scored job waits in Find jobs until it is tracked: nothing is written to Notion
+    posts = lambda: sum(m == "POST" and p.endswith("/pages") for m, p, _ in env["notion"].requests)
+    r = c.post("/api/jobs/j2/score", headers=H)
+    assert r.status_code == 200, r.text
+    assert r.json()["triage"]["fit_score"] == 8 and r.json()["notion"] == "" and posts() == 0
+    # with notion.log_triaged_min_fit set, a score at or above it adds the job, as a pipeline run does
+    env["cfg"].notion_log_triaged_min_fit = 7
+    r = c.post("/api/jobs/j2/score", headers=H)
+    assert r.json()["notion"] == "created"
+    c.get("/api/jobs?wait=1", headers=H)       # tracked locally at once; the background sync copies it to Notion
+    assert posts() == 1
+    call = env["runner"].calls[-1]
+    assert call.label == "triage:j2" and call.candidate and "jd.md" in call.documents   # candidate: sees the impact record
+    assert Store().state()["j2"]["triage"]["one_line"] == "strong TPM fit"
+    j2 = {j["id"]: j for j in c.get("/api/jobs?wait=1", headers=H).json()["jobs"]}["j2"]
+    assert j2["fit"] == 8 and j2["status"] == "Not started" and j2["notion_page_id"]   # 7+ goes to the tracker
+    assert c.get("/api/jobs/j2", headers=H).json()["triage"]["strongest_matches"] == ["m"]
+    # a tailored job is re-scored without touching its Notion row
+    before = posts()
+    assert c.post("/api/jobs/j1/score", headers=H).json()["notion"] == "" and posts() == before
+    # a pasted posting becomes a stored job that can be scored
+    assert c.post("/api/jobs", headers=H, json={"title": "Staff TPM", "company": "Acme", "description": "short"}).status_code == 400
+    jid = c.post("/api/jobs", headers=H, json={"title": "Staff TPM", "company": "Acme", "description": "x" * 700}).json()["id"]
+    assert jid == "pasted-acme-staff-tpm" and c.post(f"/api/jobs/{jid}/score", headers=H).status_code == 200
+    # a job that is only in Notion: the posting is read from its page, then stored under the same id
+    import jobpipe.jd
+    monkeypatch.setattr(jobpipe.jd, "fetch_posting_text", lambda url, client=None: "")
+    assert c.post("/api/jobs/notion-p9/score", headers=H).status_code == 422
+    monkeypatch.setattr(jobpipe.jd, "fetch_posting_text", lambda url, client=None: "Lead programs. " * 60)
+    assert c.post("/api/jobs/notion-p9/score", headers=H).status_code == 200
+    p9 = {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}["notion-p9"]
+    assert p9["local"] and p9["fit"] == 8 and p9["status"] == "Applied" and p9["title"] == "Manual job"
+    assert c.post("/api/jobs/nope/score", headers=H).status_code == 404
+    assert c.get("/api/summary", headers=H).json()["impact_record"]["path"].endswith("impact-record.md")
+
+
+def test_add_a_job_from_its_link(env, monkeypatch):
+    c = env["client"]
+    import jobpipe.jd
+    read = {"https://jobs.lever.co/zeta/1": {"job_title": "Staff TPM", "company": "Zeta", "location": "Remote",
+                                             "remote": True, "description": "Lead the release train. " * 40}}
+    monkeypatch.setattr(jobpipe.jd, "read_posting",
+                        lambda url, client=None: {"url": url, **read.get(url, {"description": ""})})
+    assert c.post("/api/jobs/lookup", headers=H, json={"url": "not a link"}).status_code == 400
+    d = c.post("/api/jobs/lookup", headers=H, json={"url": "jobs.lever.co/zeta/1"}).json()
+    assert d["url"] == "https://jobs.lever.co/zeta/1" and d["job_title"] == "Staff TPM" and d["readable"]
+    assert d["existing"] is None
+    # a link the app already has, even with tracking on it, is that job
+    d = c.post("/api/jobs/lookup", headers=H, json={"url": JOB_URL + "?utm_source=linkedin"}).json()
+    assert d["existing"]["id"] == "j1"
+    assert c.post("/api/jobs", headers=H, json={"url": JOB_URL}).json() == {"id": "j1", "existing": True}
+    # just the link: the posting is read on the server
+    r = c.post("/api/jobs", headers=H, json={"url": "https://jobs.lever.co/zeta/1"})
+    assert r.json() == {"id": "pasted-zeta-staff-tpm", "existing": False}
+    job = Store().job("pasted-zeta-staff-tpm")
+    assert (job["location"], job["remote"], job["description_read"]) == ("Remote", True, True)
+    row = {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}["pasted-zeta-staff-tpm"]
+    assert row["searches"] == ["manual"] and not row["tracker_id"] and row["remote"]
+    assert c.get("/api/jobs/pasted-zeta-staff-tpm", headers=H).json()["description_read"] is True
+    assert c.post("/api/jobs/pasted-zeta-staff-tpm/score", headers=H).status_code == 200
+    # a page that can't be read needs the description pasted
+    r = c.post("/api/jobs", headers=H, json={"url": "https://example.com/jobs/9", "title": "PM", "company": "Ex"})
+    assert r.status_code == 400 and "Paste the full job description" in r.json()["detail"]
+    text = "Shape the roadmap for Ex's platform. " * 10
+    r = c.post("/api/jobs", headers=H, json={"url": "https://example.com/jobs/9", "title": "PM", "company": "Ex",
+                                             "description": text})
+    job = Store().job(r.json()["id"])
+    assert job["description_read"] is False and job["url"] == "https://example.com/jobs/9"
+
+
+def test_a_pasted_role_located_remote_is_remote(env):
+    c = env["client"]
+    text = "Plan retreats and offsites for client teams worldwide. " * 10
+    add = lambda title, location: c.post("/api/jobs", headers=H, json={
+        "title": title, "company": "TeamOut", "location": location, "description": text}).json()["id"]
+    ids = [add("Trip Designer", "Remote"), add("Ops Lead", "Remote, US"), add("Planner", "Hybrid / Remote - NYC"),
+           add("Concierge", "New York, NY")]
+    rows = {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    assert [(rows[i]["remote"], rows[i]["mode"]) for i in ids] == [
+        (True, "Remote"), (True, "Remote"), (False, "Hybrid"), (False, "Not stated")]
+
+
+def test_pasted_description_is_kept_with_the_role(env, monkeypatch):
+    c = env["client"]
+    import jobpipe.jd
+    monkeypatch.setattr(jobpipe.jd, "fetch_posting_text", lambda url, client=None: "")
+    jobs = lambda: {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    n = len(jobs())
+    assert c.put("/api/jobs/notion-p9/description", headers=H, json={"description": "short"}).status_code == 400
+    assert c.put("/api/jobs/nope/description", headers=H, json={"description": "x" * 400}).status_code == 404
+    text = "Own the release train for Zeta's platform. " * 10       # under 600 chars, but pasted: enough
+    assert c.put("/api/jobs/notion-p9/description", headers=H, json={"description": text}).status_code == 200
+    p9 = jobs()["notion-p9"]
+    assert len(jobs()) == n and p9["local"] and p9["status"] == "Applied"     # still one role, still tracked
+    d = c.get("/api/jobs/notion-p9", headers=H).json()
+    assert d["description"] == text.strip() and d["description_pasted"]
+    # scoring compares against the pasted text, without reading the page
+    assert c.post("/api/jobs/notion-p9/score", headers=H).status_code == 200
+    jd = env["runner"].calls[-1].documents["jd.md"]
+    assert "Own the release train" in jd and "pasted from the posting by you" in jd
+    # a found job: the pasted text replaces the stored one, and survives the search finding it again
+    store = Store()
+    found = store.job("j2")
+    assert c.put("/api/jobs/j2/description", headers=H, json={"description": text + " Extra."}).status_code == 200
+    assert store.job("j2")["description_before_paste"] == found.get("description", "")
+    store.save_job(found, "s1")
+    assert store.job("j2")["description"].endswith("Extra.")
+
+
+def wait_for_scoring(c):
+    import time
+    for _ in range(400):
+        sc = c.get("/api/summary", headers=H).json()["scoring"]
+        if not sc["active"]:
+            return sc
+        time.sleep(0.05)
+    raise AssertionError("scoring didn't finish")
+
+
+def test_batch_signal_then_full_score(env):
+    import asyncio
+    from jobpipe.pipeline import Pipeline
+    Store().save_job(make_job("j3", company="Gamma"), "tpm-remote")
+    with env["client"] as c:     # one event loop for the whole test, as under uvicorn
+        by_id = lambda: {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+        # signal: several jobs at once, queued in the background
+        r = c.post("/api/score", headers=H, json={"job_ids": ["j2", "j3", "nope"], "kind": "signal"})
+        assert r.status_code == 200 and set(r.json()["active"]) == {"j2", "j3"}
+        sc = wait_for_scoring(c)
+        assert sc["errors"] == {} and sc["finished"] == 2
+        assert by_id()["j2"]["fit"] == 8 and by_id()["j3"]["fit"] == 8 and by_id()["j3"]["impact_score"] is None
+        assert c.post("/api/score", headers=H, json={"job_ids": ["nope"]}).status_code == 400
+        assert c.post("/api/score", headers=H, json={"job_ids": ["j2"], "kind": "bogus"}).status_code == 400
+
+        # full: stages 1-2 of the tailoring pipeline, no résumé written
+        env["runner"].calls.clear()
+        c.post("/api/score", headers=H, json={"job_ids": ["j2"], "kind": "full"})
+        assert wait_for_scoring(c)["errors"] == {}
+        assert [x.label for x in env["runner"].calls] == ["01-objectives", "02-skills", "03-experience", "04-matcher"]
+        d = c.get("/api/jobs/j2", headers=H).json()
+        full = d["full_score"]
+        assert full["scores"]["Impact record"] == 8 and full["recommended_base"] == BASE
+        assert full["gaps"] == ["AI evaluation depth"] and full["baseline"][BASE]["total"] > 0
+        assert full["baseline"]["Impact record"]["total"] is None       # no document to count keywords in
+        assert d["impact_score"] == 8 and not d["tailored"] and d["has_heatmap"]
+        assert c.get("/api/jobs/j2/heatmap", headers=H).status_code == 200
+        # scoring it again reuses the saved analysis: nothing changed, so no Claude calls
+        env["runner"].calls.clear()
+        c.post("/api/score", headers=H, json={"job_ids": ["j2"], "kind": "full"})
+        assert wait_for_scoring(c)["errors"] == {} and env["runner"].calls == []
+        # a tailored job already has its full score; the reason is kept for the UI
+        c.post("/api/score", headers=H, json={"job_ids": ["j1"], "kind": "full"})
+        assert "already scored every requirement" in wait_for_scoring(c)["errors"]["j1"]
+
+    # tailoring the job afterwards starts at the writers
+    runner = FakeRunner()
+    p = Pipeline(config.load(env["searches"]), store=Store(), jobs=object(), runner=runner, use_notion=False,
+                 log=lambda s: None, fetch_pages=False)
+    done = asyncio.run(p.tailor_job(Store().job("j2")))
+    assert done.tailored and [x.label for x in runner.calls][:2] == ["05-writer-A", "05-writer-B"]
+
+
+def test_scoring_queue_limits_and_cancel():
+    import asyncio
+    from jobpipe.web.scoring import Scorer
+
+    async def scenario():
+        gate, started = asyncio.Event(), []
+
+        async def slow(jid):
+            started.append(jid)
+            await gate.wait()
+            if jid == "c":
+                raise RuntimeError("boom")
+
+        s = Scorer({"signal": slow, "full": slow})
+        s.submit(list("abcde"), "signal")
+        s.submit(["a"], "signal")                      # already queued: ignored
+        await asyncio.sleep(0.01)
+        states = {k: v["state"] for k, v in s.public()["active"].items()}
+        assert started == ["a", "b", "c"] and states == {"a": "running", "b": "running", "c": "running",
+                                                          "d": "queued", "e": "queued"}
+        s.cancel_queued()
+        assert set(s.public()["active"]) == {"a", "b", "c"} and s.finished == 2
+        gate.set()
+        await asyncio.sleep(0.01)
+        assert s.public() == {"active": {}, "errors": {"c": "boom"}, "finished": 5} and started == ["a", "b", "c"]
+
+    asyncio.run(scenario())
+
+
+def test_static_and_pdf_caching(env):
+    c = env["client"]
+    html = c.get("/").text
+    assert "/static/app.js?v=" in html and "/static/app.css?v=" in html
+    assert c.get("/").headers["cache-control"] == "no-store"
+    assert "immutable" in c.get("/static/app.js?v=abc").headers["cache-control"]
+    assert c.get("/static/app.js").headers["cache-control"] == "no-cache"
+    r = c.get("/api/jobs/j1/resume/1.pdf", headers=H)
+    assert r.status_code == 200 and r.headers["cache-control"] == "private, no-cache"
+    title = c.get("/api/jobs/j1", headers=H).json()["title"]
+    name = f"{config.candidate().name} - {title} Resume.pdf"
+    assert r.headers["content-disposition"] == f'inline; filename="{name}"; filename*=UTF-8\'\'{quote(name)}'  # not "1.pdf"
+    assert c.get("/api/jobs/j1/resume/1.pdf", headers={**H, "If-None-Match": r.headers["etag"]}).status_code == 304
+    assert c.get("/api/summary", headers=H).headers["cache-control"] == "no-store"
+
+
+def test_detail_report_and_files(env):
+    c = env["client"]
+    d = c.get("/api/jobs/j1", headers=H).json()
+    assert d["resume"]["current"] == 1 and d["resume"]["versions"][0]["source"] == "pipeline"
+    assert d["resume"]["versions"][0]["check"]["passed"] is True
+    assert d["has_report"] is True
+    html = c.get("/api/jobs/j1/report", headers=H).json()["html"]
+    assert "<script>" not in html and "&lt;script&gt;" in html and "<table>" in html
+    assert c.get("/api/jobs/j2", headers=H).json().get("resume") is None
+    assert c.get("/api/jobs/nope", headers=H).status_code == 404
+
+
+def test_edit_propose_accept_restore(env):
+    c, run_dir = env["client"], env["run_dir"]
+    before_pdf = env["pdf"].read_bytes()
+    r = c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Lead with reliability"})
+    assert r.status_code == 200, r.text
+    p = r.json()["proposal"]
+    assert p["pages"] == 2 and p["check"]["passed"] is True and p["keywords_pct"] == 100.0
+    assert "<li>" in p["changes_html"]
+    assert any(o["op"] == "change" and any(w[0] == "add" for w in o["words"]) for o in p["diff"])
+    call = env["runner"].calls[0]
+    assert call.candidate and "Lead with reliability" in call.tail and "Do-not-claim" in call.instructions
+    assert c.get("/api/jobs/j1/resume/proposal.pdf", headers=H).status_code == 200
+    assert (run_dir / "resume-final.md").read_text() == _resume()        # nothing saved yet
+
+    h = c.post("/api/jobs/j1/edit/accept", headers=H).json()
+    assert h["current"] == 2 and h["proposal"] is None
+    assert "reliability first" in (run_dir / "resume-final.md").read_text()
+    assert env["pdf"].read_bytes() != before_pdf                          # deliverable PDF updated
+    assert c.post("/api/jobs/j1/edit/accept", headers=H).status_code == 400
+
+    h = c.post("/api/jobs/j1/restore", headers=H, json={"n": 1}).json()
+    assert h["current"] == 3 and (run_dir / "resume-final.md").read_text() == _resume()
+
+
+def test_edit_discard_and_validation(env):
+    c = env["client"]
+    assert c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "  "}).status_code == 400
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "x"})
+    assert c.get("/api/jobs/j1/edit", headers=H).json()["proposal"]["instruction"] == "x"
+    c.post("/api/jobs/j1/edit/discard", headers=H)
+    assert c.get("/api/jobs/j1/edit", headers=H).json()["proposal"] is None
+    assert not (env["run_dir"] / "versions" / "proposal.md").exists()
+    assert c.post("/api/jobs/j2/edit", headers=H, json={"instruction": "x"}).status_code == 404
+
+
+def test_chat_answers_questions_and_remembers_the_conversation(env):
+    c, runner = env["client"], env["runner"]
+    r = c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "What's weakest?"}).json()
+    assert r["proposal"] is None and "weakest part" in r["reply_html"]
+    assert [m["role"] for m in r["chat"]] == ["user", "claude"] and "<p>" in r["chat"][1]["html"]
+    assert c.get("/api/jobs/j1/edit", headers=H).json()["proposal"] is None    # a question makes no edit
+    assert "first message)" in runner.calls[0].tail and runner.calls[0].expect == ["reply.md"]
+
+    r = c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Yes, tighten it"}).json()
+    assert r["proposal"]["instruction"] == "Yes, tighten it" and r["chat"][-1]["proposal"] is True
+    tail = runner.calls[1].tail
+    assert "What's weakest?" in tail and "want me to tighten it?" in tail     # the earlier turns go with it
+
+    # a follow-up while the proposal is pending sees the proposal, and accepting is noted in the chat
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Is that two pages?"})
+    assert any(k.startswith("resume-proposed.md") for k in runner.calls[2].documents)
+    assert c.get("/api/jobs/j1/edit", headers=H).json()["proposal"]["instruction"] == "Yes, tighten it"
+    c.post("/api/jobs/j1/edit/accept", headers=H)
+    chat = c.get("/api/jobs/j1", headers=H).json()["resume"]["chat"]
+    assert chat[-1] == {**chat[-1], "role": "note", "text": "Accepted the proposed edit as v2."}
+
+    assert c.post("/api/jobs/j1/chat/clear", headers=H).json()["chat"] == []
+    assert c.get("/api/jobs/j1/chat", headers=H).json()["chat"] == []
+    assert c.get("/api/jobs/j1", headers=H).json()["resume"]["current"] == 2   # versions survive a new chat
+
+
+def test_searches_edit_round_trip(env):
+    c = env["client"]
+    d = c.get("/api/searches", headers=H).json()
+    assert [s["id"] for s in d["searches"]] == ["tpm-remote", "em-remote", "tpm-hybrid", "em-hybrid"]
+    ss = d["searches"]
+    ss.append({"id": "dir-remote", "name": "Director", "titles": ["Director of Engineering", ""], "remote": True,
+               "min_salary_usd": "350000", "limit": "5"})
+    r = c.put("/api/searches", headers=H, json={"searches": ss})
+    assert r.status_code == 200, r.text
+    text = env["searches"].read_text()
+    assert "# Your profile's settings" in text and 'titles: ["Director of Engineering"]' in text
+    assert config.load(env["searches"]).search("dir-remote").limit == 5
+    bad = [{"id": "Bad Id", "titles": ["x"]}]
+    assert c.put("/api/searches", headers=H, json={"searches": bad}).status_code == 400
+    both = [{"id": "x", "titles": ["x"], "remote": True, "work_arrangement": ["hybrid"]}]
+    assert c.put("/api/searches", headers=H, json={"searches": both}).status_code == 400
+    assert "min_salary_usd" in c.get("/api/searches/requests", headers=H).json()["tpm-remote"]
+
+
+def test_add_edit_delete_one_search(env):
+    c = env["client"]
+    new = {"name": "Director of TPM, remote", "titles": ["Director, Technical Program Management"], "remote": True, "limit": ""}
+    r = c.post("/api/searches", headers=H, json=new)
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == "director-of-tpm-remote" and [s["id"] for s in r.json()["searches"]][-1] == "director-of-tpm-remote"
+    assert c.post("/api/searches", headers=H, json=new).json()["id"] == "director-of-tpm-remote-2"   # same name again
+    assert c.post("/api/searches", headers=H, json={**new, "id": "tpm-remote"}).status_code == 400    # id taken
+    assert c.post("/api/searches", headers=H, json={"name": "No titles"}).status_code == 400
+    text = env["searches"].read_text()
+    assert "# Your profile's settings" in text and "id: director-of-tpm-remote-2" in text
+    assert config.load(env["searches"]).search("director-of-tpm-remote").remote is True
+
+    edited = {**new, "titles": ["Director of Engineering"], "remote": None, "work_arrangement": ["hybrid"], "locations": ["New York"]}
+    r = c.put("/api/searches/director-of-tpm-remote", headers=H, json=edited)
+    assert r.status_code == 200, r.text
+    s = config.load(env["searches"]).search("director-of-tpm-remote")
+    assert s.titles == ["Director of Engineering"] and s.work_arrangement == ["hybrid"] and not s.remote
+    assert c.put("/api/searches/nope", headers=H, json=edited).status_code == 404
+
+    r = c.delete("/api/searches/director-of-tpm-remote-2", headers=H)
+    assert [s["id"] for s in r.json()["searches"]] == ["tpm-remote", "em-remote", "tpm-hybrid", "em-hybrid", "director-of-tpm-remote"]
+    assert c.delete("/api/searches/director-of-tpm-remote-2", headers=H).status_code == 404
+
+
+def test_runs(env):
+    c, runs = env["client"], env["runs"]
+    r = c.post("/api/runs", headers=H, json={"kind": "run", "search_ids": ["tpm-remote", "bad id!"], "no_tailor": True})
+    assert r.status_code == 200
+    rid = r.json()["id"]
+    runs.wait(rid)
+    out = c.get(f"/api/runs/{rid}", headers=H).json()
+    assert out["status"] == "done"
+    assert out["lines"][0] == "args ['run', '--search', 'tpm-remote', '--no-tailor']"
+    assert c.post("/api/runs", headers=H, json={"kind": "tailor", "job_id": "nope"}).status_code == 400
+    assert c.post("/api/runs", headers=H, json={"kind": "rm -rf"}).status_code == 400
+    r = c.post("/api/runs", headers=H, json={"kind": "tailor-pasted", "title": "Staff TPM", "company": "Acme",
+                                             "description": "x" * 400})
+    runs.wait(r.json()["id"])
+    line = c.get(f"/api/runs/{r.json()['id']}", headers=H).json()["lines"][0]
+    assert "'tailor', 'pasted-acme-staff-tpm']" in line          # stored first, then tailored as a stored job
+    assert Store().job("pasted-acme-staff-tpm")["description"] == "x" * 400
+
+
+def test_run_results_list_the_jobs_it_scored(env):
+    c, runs = env["client"], env["runs"]
+    root = Store().root
+    runs.argv_prefix = [sys.executable, "-c",
+                        "from pathlib import Path; from jobpipe.store import Store; "
+                        f"Store(Path({str(root)!r})).update('j2', triage={{'fit_score': 7, 'one_line': 'better'}}, "
+                        "triaged_at='2026-10-01')"]
+    r = c.post("/api/runs", headers=H, json={"kind": "run", "search_ids": ["tpm-remote"], "no_tailor": True})
+    runs.wait(r.json()["id"])
+    out = c.get(f"/api/runs/{r.json()['id']}", headers=H).json()
+    assert out["status"] == "done", out["lines"]
+    assert [(x["id"], x["fit"], x["tailored"]) for x in out["results"]] == [("j2", 7, False)]
+
+    # After a restart the run, its output and its results are still there.
+    again = RunManager(db=env["runs"].db)
+    run = again.runs[r.json()["id"]]
+    assert run.status == "done" and run.label == "Search + triage" and run.args == ["run", "--search", "tpm-remote", "--no-tailor"]
+    assert [x["id"] for x in run.results] == ["j2"]
+
+
+def test_runs_are_kept_in_the_database(tmp_path):
+    db = tmp_path / "tracker.db"
+    runs = RunManager(argv_prefix=[sys.executable, "-c", "print('one'); print('two')"], db=db)
+    first = runs.start("first", ["a"], marks={"j1": "x"})
+    runs.wait(first.id)
+    runs.argv_prefix = [sys.executable, "-c", "import time; print('started'); time.sleep(30)"]
+    second = runs.start("second", [])
+    for _ in range(100):
+        if second.lines:
+            break
+        threading.Event().wait(0.05)
+
+    reopened = RunManager(argv_prefix=[sys.executable, "-c", "pass"], db=db)   # the app restarted mid-run
+    second.proc.kill()
+    a, b = reopened.runs[first.id], reopened.runs[second.id]
+    assert (a.label, a.args, a.lines, a.status, a.marks) == ("first", ["a"], ["one", "two"], "done", {"j1": "x"})
+    assert a.finished and a.results is None
+    assert (b.lines, b.status, b.returncode) == (["started"], "interrupted", None)
+    assert reopened.active() is None and reopened.start("third", []).id == second.id + 1
+
+
+def test_outside_resume_for_a_job_only_in_the_tracker(env, tmp_path):
+    c = env["client"]
+    refs = tmp_path / "repo" / "references"
+    refs.mkdir(parents=True)
+    (refs / "resume-rules.md").write_text("# Rules\n")
+    (refs / "resume-zeta-manual-job.md").write_text(_resume())
+    run = tmp_path / "repo" / "resume-runs" / "zeta-other-role"
+    run.mkdir(parents=True)
+    for name, text in (("resume-final.md", _resume()), ("jd.md", "posting"), ("04-match.md", "# Match\n")):
+        (run / name).write_text(text)
+
+    # Matched by name: every word of "zeta-manual-job" is in the job's company and title.
+    o = c.get("/api/jobs/notion-p9/outside-resume", headers=H).json()
+    assert o["matched"] and o["source"]["key"] == "ref:resume-zeta-manual-job"
+    assert [x["key"] for x in o["options"]] == ["ref:resume-zeta-manual-job", "run:zeta-other-role"]
+    assert o["resume"]["current"] == 1 and o["resume"]["editable"] is False
+    assert c.get("/api/jobs/notion-p9/resume/1.pdf", headers=H).content[:4] == b"%PDF"
+    assert c.post("/api/jobs/notion-p9/edit", headers=H, json={"instruction": "x"}).status_code == 400
+
+    # Picking the skill run copies it, with its posting and match brief, so it can be edited.
+    o = c.post("/api/jobs/notion-p9/outside-resume", headers=H, json={"source": "run:zeta-other-role"}).json()
+    assert not o["matched"] and o["source"]["key"] == "run:zeta-other-role" and o["resume"]["editable"] is True
+    p = c.post("/api/jobs/notion-p9/edit", headers=H, json={"instruction": "Lead with reliability."})
+    assert p.status_code == 200
+    assert c.post("/api/jobs/notion-p9/edit/accept", headers=H).json()["current"] == 2
+    assert not (run / "versions").exists()      # edits stay in data/, never in the repo's run folder
+
+    assert c.post("/api/jobs/notion-p9/outside-resume", headers=H, json={"source": "none"}).json()["resume"] is None
+    assert c.post("/api/jobs/notion-p9/outside-resume", headers=H, json={"source": "../x"}).status_code == 400
+    assert c.post("/api/jobs/notion-p9/outside-resume", headers=H, json={"source": ""}).json()["matched"] is True
+
+
+def test_sent_resume_recorded_when_applied_and_kept_in_notion(env):
+    c, notion = env["client"], env["notion"]
+    jobs = lambda q="": {j["id"]: j for j in c.get(f"/api/jobs{q}", headers=H).json()["jobs"]}
+    assert c.get("/api/jobs/j2/sent", headers=H).status_code == 400          # not tracked
+    assert c.get("/api/jobs/j1/sent", headers=H).json()["sent"] is None
+
+    # Marking a tailored job Applied freezes its current résumé as the one sent, and puts it in Notion.
+    c.post("/api/tracker/p1/status", headers=H, json={"status": "Applied"})
+    s = c.get("/api/jobs/j1/sent", headers=H).json()
+    assert s["sent"]["source"] == "app" and s["sent"]["note"] == "v1" and s["sent"]["name"] == env["pdf"].name
+    assert c.get("/api/jobs/j1/sent.pdf", headers=H).content[:5] == b"%PDF-"
+    assert jobs("?wait=1")["j1"]["pending"] is False
+    assert notion.rows["p1"]["properties"]["Resume Used"]["files"][0]["name"] == env["pdf"].name
+
+    # A file already in Notion's Resume Used is shown (downloaded once), and never replaced by an upload.
+    pdf = env["pdf"].read_bytes()
+    notion.uploads["fu9"] = ("Sent-Zeta.pdf", pdf)
+    notion.rows["p9"]["properties"]["Resume Used"] = {"files": [
+        {"name": "Sent-Zeta.pdf", "type": "file", "file": {"url": "https://files.example/fu9/Sent-Zeta.pdf"}}]}
+    assert jobs("?refresh=1")["notion-p9"]["sent_resume"] == "Sent-Zeta.pdf"
+    assert c.get("/api/jobs/notion-p9/sent", headers=H).json()["sent"]["source"] == "notion"
+    assert c.get("/api/jobs/notion-p9/sent.pdf", headers=H).content == pdf
+    assert c.put("/api/jobs/notion-p9/sent", headers={**H, "X-Filename": "x.pdf"}, content=b"not a pdf").status_code == 400
+    s = c.put("/api/jobs/notion-p9/sent", headers={**H, "X-Filename": "My%20Resume.pdf"}, content=pdf).json()
+    assert s["sent"]["source"] == "upload" and s["sent"]["name"] == "My-Resume.pdf" and s["in_notion"]
+    assert jobs("?wait=1")["notion-p9"]["sent_resume"] == "My-Resume.pdf"
+    assert notion.rows["p9"]["properties"]["Resume Used"]["files"][0]["name"] == "Sent-Zeta.pdf"
+
+    # Forgetting the copy here falls back to Notion's file.
+    assert c.delete("/api/jobs/notion-p9/sent", headers=H).json()["sent"]["source"] == "notion"
+
+
+def test_denied_without_marking_applied_keeps_the_resume_sent(env):
+    c, notion = env["client"], env["notion"]
+    assert "Denied" in c.get("/api/summary", headers=H).json()["statuses"]
+    jobs = lambda: {j["id"]: j for j in c.get("/api/jobs?wait=1", headers=H).json()["jobs"]}
+    assert jobs()["j1"]["status"] == "Not started"
+    # Turned down without being marked Applied first: it was still sent, so its résumé is kept as the one sent.
+    assert c.post("/api/tracker/p1/status", headers=H, json={"status": "Denied"}).json() == {"ok": True}
+    assert c.get("/api/jobs/j1/sent", headers=H).json()["sent"]["note"] == "v1"
+    job = jobs()["j1"]
+    assert job["status"] == "Denied" and job["pending"] is False
+    assert notion.rows["p1"]["properties"]["Status"]["status"]["name"] == "Denied"
+
+
+def test_runs_side_by_side(env):
+    c, runs = env["client"], env["runs"]
+    runs.runs.clear()
+    runs.argv_prefix = [sys.executable, "-c", "import time; time.sleep(5)"]
+    start = lambda **body: c.post("/api/runs", headers=H, json=body)
+    search = start(kind="preflight", search_ids=["tpm-remote"])
+    assert search.status_code == 200
+    r = start(kind="run", search_ids=["tpm-remote"])                 # searches take turns
+    assert r.status_code == 409 and "search is already going" in r.json()["detail"]
+    tailor = start(kind="tailor", job_id="j2")                       # a tailoring run goes alongside
+    assert tailor.status_code == 200
+    r = start(kind="tailor", job_id="j2")                            # but not twice for one job
+    assert r.status_code == 409 and "already being tailored" in r.json()["detail"]
+    assert {x["id"] for x in c.get("/api/summary", headers=H).json()["active_runs"]} == {search.json()["id"], tailor.json()["id"]}
+
+    runs.max_runs = 2
+    r = start(kind="tailor", job_id="j1")
+    assert r.status_code == 409 and "the most at once" in r.json()["detail"]
+    for x in (search, tailor):
+        c.post(f"/api/runs/{x.json()['id']}/stop", headers=H)
+        runs.wait(x.json()["id"])
+    assert start(kind="preflight", search_ids=["tpm-remote"]).status_code == 200
+    c.post(f"/api/runs/{max(runs.runs)}/stop", headers=H)
+
+
+def test_overlapping_runs_keep_their_own_results(env, monkeypatch):
+    c, runs, store = env["client"], env["runs"], env["store"]
+    runs.runs.clear()
+    runs.argv_prefix = [sys.executable, "-c", "import time; time.sleep(5)"]
+    a = c.post("/api/runs", headers=H, json={"kind": "tailor", "job_id": "j1"}).json()["id"]
+    b = c.post("/api/runs", headers=H, json={"kind": "tailor", "job_id": "j2"}).json()["id"]
+    for rid, jid in ((a, "j1"), (b, "j2")):          # what each run's process does to the store
+        monkeypatch.setenv("JOBPIPE_RUN_ID", str(rid))
+        store.update(jid, triage={"fit_score": 9}, triaged_at="2026-10-02")
+    monkeypatch.delenv("JOBPIPE_RUN_ID")
+    for rid in (a, b):
+        c.post(f"/api/runs/{rid}/stop", headers=H)
+        runs.wait(rid)
+    assert [x["id"] for x in c.get(f"/api/runs/{a}", headers=H).json()["results"]] == ["j1"]
+    assert [x["id"] for x in c.get(f"/api/runs/{b}", headers=H).json()["results"]] == ["j2"]
+
+
+def test_confirmed_facts(env):
+    c = env["client"]
+    assert c.post("/api/notes", headers=H, json={"text": ""}).status_code == 400
+    md = c.post("/api/notes", headers=H, json={"text": "At Fabrikam I didn't manage the vendor team."}).json()["markdown"]
+    assert "vendor team" in md and "User-confirmed notes" in env["notes"].read_text()
+
+
+def test_loosen_lists_and_run_scores(tmp_path):
+    from jobpipe.web.server import loosen_lists, run_scores
+    assert loosen_lists("Intro:\n- a\n- b\n\n| t |\n") == "Intro:\n\n- a\n- b\n\n| t |"
+    (tmp_path / "ratings-final.json").write_text(json.dumps({"scores": [8, 6, 7, 9]}))
+    (tmp_path / "scorecard-final.md").write_text("| Source | S | E | K | Total |\n| Tailored resume | 96% | 79% | 74% | 83% PASS |\n")
+    assert run_scores(tmp_path) == {"impact_score": 8.0, "resume_score": 9.0, "ats_total": 83.0}
+
+
+def test_track_and_dismiss_found_jobs(env):
+    c, notion = env["client"], env["notion"]
+    jobs = {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    assert jobs["j2"]["notion_page_id"] is None and jobs["j2"]["dismissed"] is False
+
+    assert c.post("/api/jobs/j2/dismiss", headers=H, json={"dismissed": True}).json() == {"ok": True}
+    assert {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}["j2"]["dismissed"] is True
+
+    r = c.post("/api/jobs/j2/track", headers=H).json()
+    assert r["action"] == "created"
+    j2 = {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}["j2"]
+    assert j2["tracker_id"] and j2["status"] == "Not started" and j2["dismissed"] is False     # tracked at once, locally
+    c.get("/api/jobs?refresh=1", headers=H)                                                     # then copied to Notion
+    created = next(row["_create"]["properties"] for row in notion.rows.values() if "_create" in row)
+    assert created["Name"]["title"][0]["text"]["content"] == f"{TITLE} — Beta"
+    assert created["Status"]["status"]["name"] == "Not started" and created["Fit Score"]["number"] == 5.0
+    assert created["Notes"]["rich_text"][0]["text"]["content"].startswith("Triaged ")
+    j2 = {j["id"]: j for j in c.get("/api/jobs?refresh=1", headers=H).json()["jobs"]}["j2"]
+    assert j2["notion_page_id"] and j2["status"] == "Not started" and j2["pending"] is False
+
+    # a tailored job already in Notion: Track updates its row, Not started -> In progress
+    assert c.post("/api/jobs/j1/track", headers=H).json()["action"] == "updated"
+    c.get("/api/jobs?refresh=1", headers=H)
+    assert notion.rows["p1"]["properties"]["Status"]["status"]["name"] == "In progress"
+    assert c.post("/api/jobs/nope/track", headers=H).status_code == 404
+
+
+def test_run_output_streams_while_running():
+    runs = RunManager(argv_prefix=[sys.executable, "-c", "import time; print('first'); time.sleep(1.5); print('second')"])
+    run = runs.start("stream", [])
+    import time
+    for _ in range(50):              # the first line arrives long before the process ends
+        if run.lines:
+            break
+        time.sleep(0.05)
+    assert run.lines == ["first"] and run.status == "running"
+    runs.wait(run.id)
+    assert run.lines == ["first", "second"] and run.status == "done"
+
+
+def test_failed_tailoring_exits_with_an_error(monkeypatch, capsys):
+    import jobpipe.pipeline
+    from jobpipe import cli
+
+    class Failing:
+        runner = None
+
+        def __init__(self, *a, **k):
+            pass
+
+        async def tailor_job(self, job):
+            from types import SimpleNamespace
+            return SimpleNamespace(tailored=None, error="tailoring failed: the writer returned nothing")
+
+    monkeypatch.setattr(jobpipe.pipeline, "Pipeline", Failing)
+    monkeypatch.setattr(Store, "job", lambda self, jid: {"id": jid, "job_title": "TPM", "company": "Acme"})
+    with pytest.raises(SystemExit) as e:
+        cli.main(["tailor", "j1"])
+    assert "the writer returned nothing" in str(e.value.code)
+
+
+def test_profile_edit(env):
+    c, searches = env["client"], env["searches"]
+    p = c.get("/api/profile", headers=H).json()
+    assert p["saved"] and p["example"] and p["candidate"]["name"] == "Jordan Rivera"
+    assert [f["file"] for f in p["files"]] == ["resume-platform.md"] and p["files"][0]["words"] > 500
+    assert p["impact_record"]["words"] == 6                         # the env's impact record
+
+    body = {"name": "Sam  Lee", "pronouns": "she/her", "city": "Austin, TX", "phone": "+1 555-010-0142",
+            "email": "sam@example.com", "linkedin": "https://www.linkedin.com/in/sam-lee/", "pdf_prefix": "",
+            "evidence": "", "resumes": []}
+    r = c.put("/api/profile", headers=H, json=body)
+    assert r.status_code == 400 and "at least one résumé" in r.json()["detail"]
+    r = c.put("/api/profile", headers=H, json={**body, "linkedin": "jordan.example.com",
+                                               "resumes": [{"name": "Platform resume", "file": "resume-platform.md"}]})
+    assert r.status_code == 400 and "LinkedIn" in r.json()["detail"]
+    r = c.put("/api/profile", headers=H, json={**body, "resumes": [{"name": "X", "file": "../impact-record.md"}]})
+    assert r.status_code == 400
+
+    env["runs"].active = lambda: object()                          # a run is going
+    r = c.put("/api/profile", headers=H, json={**body, "resumes": [{"name": "Platform resume", "file": "resume-platform.md"}]})
+    assert r.status_code == 409
+    del env["runs"].active
+
+    r = c.put("/api/profile", headers=H, json={**body, "resumes": [{"name": "Platform resume", "file": "resume-platform.md"}]})
+    assert r.status_code == 200, r.text
+    assert not r.json()["example"]                                   # saving makes it yours
+    text = searches.read_text()
+    assert "# The contact line every résumé must carry." in text and "example:" not in text
+    cand = config.parse_candidate(config.yaml.safe_load(text)["candidate"])
+    assert (cand.name, cand.pronouns, cand.linkedin) == ("Sam Lee", "she/her", "linkedin.com/in/sam-lee")
+    assert cand.pdf_prefix == "Sam-Lee-Resume" and cand.resumes == {"Platform resume": "resume-platform.md"}
+    assert cand.evidence == config.Candidate(name="x").evidence      # blank: the generic default
+    assert config.load(searches).search("tpm-remote")                # the searches are untouched
+
+
+def test_profile_resume_upload(env):
+    c = env["client"]
+    up = lambda **kw: c.post("/api/profile/resumes", headers=H, json={"filename": "Platform Leadership.md",
+                                                                       "markdown": "# Jordan Rivera\n**Staff TPM**\n", **kw})
+    r = up()
+    assert r.status_code == 200 and r.json()["file"] == "resume-platform-leadership.md"
+    assert (config.REFERENCES / "resume-platform-leadership.md").read_text().startswith("# Jordan Rivera")
+    assert "resume-platform-leadership.md" in [f["file"] for f in r.json()["files"]]
+    assert up().status_code == 409
+    assert up(replace=True, markdown="# Jordan Rivera\n**Director**\n").status_code == 200
+    assert c.post("/api/profile/resumes", headers=H, json={"filename": "cv.pdf", "markdown": "x"}).status_code == 400
+
+
+def test_impact_record_edit_and_save(env):
+    c, path = env["client"], env["impact"]
+    assert c.get("/api/impact-record").status_code == 401
+    d = c.get("/api/impact-record", headers=H).json()
+    assert d["markdown"] == path.read_text() and d["version"] and d["updated"]
+
+    new = d["markdown"] + "\n## Northwind\n\nRan partner onboarding.\n"
+    saved = c.put("/api/impact-record", headers=H, json={"markdown": new, "version": d["version"]}).json()
+    assert path.read_text() == new and saved["version"] != d["version"]
+    # The text it replaced is kept, once per stretch of editing.
+    snaps = list((env["store"].root / "impact-record-history").glob("*.md"))
+    assert [s.read_text() for s in snaps] == [d["markdown"]]
+    again = c.put("/api/impact-record", headers=H, json={"markdown": new + "More.\n", "version": saved["version"]}).json()
+    assert len(list(snaps[0].parent.glob("*.md"))) == 1
+
+    # Changed outside the window: the save is refused with what's on disk, unless forced.
+    path.write_text("# Edited in another editor\n")
+    r = c.put("/api/impact-record", headers=H, json={"markdown": "# Mine\n", "version": again["version"]})
+    assert r.status_code == 409 and r.json()["current"]["markdown"] == "# Edited in another editor\n"
+    assert path.read_text() == "# Edited in another editor\n"
+    r = c.put("/api/impact-record", headers=H, json={"markdown": "# Mine\n", "version": again["version"], "force": True})
+    assert r.status_code == 200 and path.read_text() == "# Mine\n"
+
+    assert c.put("/api/impact-record", headers=H, json={"markdown": "  \n", "version": r.json()["version"]}).status_code == 400
+    assert path.read_text() == "# Mine\n"
+
+
+def test_interview_prep_notes(env):
+    c, path = env["client"], env["store"].root / "interview-prep.md"
+    assert c.get("/api/interview-prep").status_code == 401
+    assert not path.exists()
+    # First open writes the starter, in data/ where Claude can find it and add to it.
+    d = c.get("/api/interview-prep", headers=H).json()
+    assert path.read_text() == d["markdown"] and d["markdown"].startswith("# Interview prep") and d["path"] == str(path)
+    assert "## Stories to find" in d["markdown"]
+
+    new = d["markdown"] + "- [ ] A time I pushed back on a VP\n"
+    saved = c.put("/api/interview-prep", headers=H, json={"markdown": new, "version": d["version"]}).json()
+    assert path.read_text() == new
+    assert [s.read_text() for s in (env["store"].root / "interview-prep-history").glob("*.md")] == [d["markdown"]]
+
+    # Claude adds a note while the tab is open: the stale save is refused with the new text.
+    path.write_text(new + "- [ ] Numbers for the Northwind migration\n")
+    r = c.put("/api/interview-prep", headers=H, json={"markdown": new + "Mine\n", "version": saved["version"]})
+    assert r.status_code == 409 and "Northwind migration" in r.json()["current"]["markdown"]
+
+    # Unlike the impact record, it can be cleared.
+    r = c.put("/api/interview-prep", headers=H, json={"markdown": "", "version": r.json()["current"]["version"]})
+    assert r.status_code == 200 and path.read_text() == ""
+    assert c.get("/api/interview-prep", headers=H).json()["markdown"] == ""
+
+    html = c.post("/api/interview-prep/preview", headers=H, json={"markdown": "- [ ] find\n- [x] done\n"}).json()["html"]
+    assert '<li class="task">☐ find</li>' in html and '<li class="task">☑ done</li>' in html
+
+
+def test_impact_record_preview_escapes_html(env):
+    html = env["client"].post("/api/impact-record/preview", headers=H,
+                              json={"markdown": "## Hi\n\n<script>alert(1)</script>\n\n- a\n- b\n"}).json()["html"]
+    assert "<h2>Hi</h2>" in html and "<script>" not in html and "<li>a</li>" in html
+
+
+
+def test_a_job_is_tailored_by_one_process_at_a_time(tmp_path):
+    from jobpipe.store import Store
+    store = Store(tmp_path)
+    with store.tailoring("j1") as first:
+        # A second process (here, a second open of the lock file) is turned away while the first holds it.
+        with store.tailoring("j1") as second, store.tailoring("j2") as other:
+            assert (first, second, other) == (True, False, True)
+    with store.tailoring("j1") as again:
+        assert again
+
+
+# ---- startups ---------------------------------------------------------------------------------------
+def test_startups_tab_roles_into_find_jobs_and_the_tracker(env, monkeypatch):
+    from jobpipe import startups as su
+    c = env["client"]
+    store = su.StartupStore(config.DATA / "startups.json")
+    store.merge([{"name": "Acme", "website": "https://acme.com", "stage": "Series B", "one_liner": "AI for banks", "hq": "New York, NY",
+                  "round": {"name": "Series B", "stage": "Series B", "amount": 2e7, "currency": "$", "amount_usd": 2e7, "date": "2026-10-01",
+                            "headline": "Acme Raises $20M in Series B Funding", "url": "https://news.example/acme", "source": "FinSMEs"},
+                  "sources": [{"kind": "news", "name": "FinSMEs", "url": "https://news.example/acme", "at": "2026-10-01"}]},
+                 {"name": "Zeta", "website": "https://zeta.example", "batch": "Summer 2026", "hiring": True, "yc_stage": "Early"}])
+    d = c.get("/api/startups", headers=H).json()
+    assert d["count"] == 2 and d["recent"] == 1 and d["lookup"] is False and "Technical Program Manager" in d["phrases"]
+    by = {s["id"]: s for s in d["startups"]}
+    assert by["acme"]["line"] == "Series B · $20M · Oct 2026 (FinSMEs)" and by["acme"]["round"]["amount"] == "$20M"
+    assert by["zeta"]["batch"] == "S26" and by["zeta"]["stage"] == "Unknown" and by["zeta"]["roles"] is None
+    # the job already stored at Acme (j1, from a filter) now carries Acme's round, by company name
+    rows = {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    assert rows["j1"]["funding"]["stage"] == "Series B" and rows["j1"]["funding"]["line"].startswith("Series B · $20M")
+    assert rows["j2"]["funding"] is None
+    store.merge([{"name": "Beta", "stage": "Growth", "getro_stage": "ipo", "exited": "public"}])      # j2's company went public: no chip
+    assert {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}["j2"]["funding"] is None
+    # read Acme's open roles (its board is mocked), add the matching one, and it lands in Find jobs with the round
+    roles = {"board": {"kind": "greenhouse", "board": "acme", "url": "https://boards.greenhouse.io/acme"}, "careers_url": "", "checked": "2026-10-04T00:00:00+00:00",
+             "jobs": [{"title": "Staff Technical Program Manager", "url": "https://boards.greenhouse.io/acme/jobs/77", "location": "New York (Remote)",
+                       "remote": True, "description": "Run the platform programs. " * 40, "posted": "2026-10-01", "id": "77", "match": True},
+                      {"title": "Sales Lead", "url": "https://boards.greenhouse.io/acme/jobs/78", "location": "Austin", "remote": False,
+                       "description": "Sell. " * 100, "posted": "2026-10-01", "id": "78", "match": False}]}
+    monkeypatch.setattr(su, "open_roles", lambda s, phrases, *a, **k: roles)
+    d = c.post("/api/startups/acme/roles", headers=H).json()
+    assert d["board"]["kind"] == "greenhouse" and [j["job_id"] for j in d["roles"]["jobs"]] == [None, None]
+    assert c.post("/api/startups/acme/roles/add", headers=H, json={"url": "https://nope"}).status_code == 404
+    r = c.post("/api/startups/acme/roles/add", headers=H, json={"url": "https://boards.greenhouse.io/acme/jobs/77"}).json()
+    assert r == {"id": "startup-acme-staff-technical-program-manager-77", "existing": False}
+    assert c.post("/api/startups/acme/roles/add", headers=H, json={"url": "https://boards.greenhouse.io/acme/jobs/77"}).json()["existing"]
+    rows = {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    job = rows[r["id"]]
+    assert job["funding"]["stage"] == "Series B" and job["remote"] and job["searches"] == ["startups"] and not job["tracker_id"]
+    acme = next(s for s in c.get("/api/startups", headers=H).json()["startups"] if s["id"] == "acme")
+    assert acme["roles"]["jobs"][0]["job_id"] == r["id"]
+    # tracking it writes the round into the tracker's notes and the Notion page body
+    assert c.post(f"/api/jobs/{r['id']}/track", headers=H).json()["action"] == "created"
+    c.get("/api/jobs?wait=1", headers=H)
+    created = [b for m, p, b in env["notion"].requests if m == "POST" and p.endswith("/pages")]
+    mine = next(b for b in created if "jobs/77" in b["properties"]["Job URL"]["url"])
+    assert "Series B · $20M · Oct 2026 (FinSMEs)" in mine["properties"]["Notes"]["rich_text"][0]["text"]["content"]
+    body = json.dumps(mine.get("children", []), ensure_ascii=False)
+    assert "Funding:" in body and "Series B · $20M · Oct 2026 (FinSMEs)" in body
+    # tracking the company itself: an "Open roles — Zeta" row linked to its careers page, with what's known
+    r = c.post("/api/startups/zeta/track", headers=H).json()
+    assert r["action"] == "created" and r["tracker_id"]
+    rows = {j["id"]: j for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    row = rows[r["tracker_id"]] if r["tracker_id"] in rows else next(j for j in rows.values() if j["tracker_id"] == r["tracker_id"])
+    assert row["title"] == "Open roles" and row["company"] == "Zeta" and row["status"] == "Not started" and row["url"] == "https://zeta.example"
+    assert row["funding"]["batch"] == "S26" and row["funding"]["line"] == "YC S26"
+    assert next(s for s in c.get("/api/startups", headers=H).json()["startups"] if s["id"] == "zeta")["tracked"] == r["tracker_id"]
+    # dismiss, add by hand, unknown ids, and the refresh run
+    assert c.patch("/api/startups/zeta", headers=H, json={"dismissed": True}).json()["dismissed"] is True
+    assert c.get("/api/startups", headers=H).json()["count"] == 3
+    assert c.post("/api/startups", headers=H, json={"name": " "}).status_code == 400
+    s = c.post("/api/startups", headers=H, json={"name": "Nova Labs", "website": "nova.example"}).json()
+    assert s["id"] == "nova-labs" and s["website"] == "https://nova.example" and s["sources"][0]["kind"] == "manual"
+    assert c.post("/api/startups/nope/roles", headers=H).status_code == 404
+    assert "no lookup key" in c.post("/api/startups/nova-labs/enrich", headers=H).json()["detail"]
+    run = c.post("/api/startups/refresh", headers=H).json()
+    assert run["label"] == "Startup search" and run["args"] == ["startups", "refresh"]
+    assert c.post("/api/startups/refresh", headers=H).status_code == 409
+    env["runs"].wait(run["id"])
+    sm = c.get("/api/summary", headers=H).json()["startups"]
+    assert sm["count"] == 4 and sm["hiring"] == 1 and sm["auto_refresh_hours"] == 24        # Acme has a matching role
+    # the app's own timer: a refresh is due while the sources have never been read, not once they just were
+    assert env["app"].state.auto_refresh().label == "Startup search"
+    env["runs"].wait(env["runs"].active().id) if env["runs"].active() else None
+    su.StartupStore(config.DATA / "startups.json").update_meta(refreshed=now_iso_for_test())
+    assert env["app"].state.auto_refresh() is None
+
+
+def now_iso_for_test():
+    from jobpipe.store import now_iso
+    return now_iso()
+
+
+def test_ai_settings(env, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)              # restored after the test
+    c, searches = env["client"], env["searches"]
+    a = c.get("/api/ai", headers=H).json()
+    assert a["backend"] == "claude-code" and a["stages"]["writer"] == {"model": "claude-opus-5-5", "effort": "high"}
+    assert {p["id"] for p in a["providers"]} >= {"claude-code", "api", "openai", "gemini", "ollama"}
+    assert c.post("/api/ai/models", headers=H, json={"backend": "claude-code"}).json()["models"][0] == "claude-opus-5-5"
+    assert c.post("/api/ai/models", headers=H, json={"backend": "openai"}).status_code == 400   # no key yet
+
+    stages = {s: {"model": "gpt-x", "effort": "medium"} for s in ("triage", "analysis", "writer")}
+    assert c.put("/api/ai", headers=H, json={"backend": "openai", "stages": {**stages, "writer": {"model": ""}}}).status_code == 400
+    assert c.put("/api/ai", headers=H, json={"backend": "openai-compatible", "stages": stages}).status_code == 400  # no address
+    a = c.put("/api/ai", headers=H, json={"backend": "openai", "stages": stages, "key": "sk-new"}).json()
+    assert a["backend"] == "openai" and next(p for p in a["providers"] if p["id"] == "openai")["key_set"]
+    text = searches.read_text()
+    assert "backend: openai" in text and "writer: {model: gpt-x, effort: medium}" in text
+    assert "# Which AI does the work" in text                   # comments kept
+    assert "OPENAI_API_KEY=sk-new" in (config.PROFILE / ".env").read_text()
+    assert oct((config.PROFILE / ".env").stat().st_mode & 0o777) == "0o600"
+    assert config.load(searches).writer_model == config.ModelCfg("gpt-x", "medium")
+    assert c.get("/api/summary", headers=H).json()["backend_label"] == "ChatGPT (OpenAI API)"
+    a = c.put("/api/ai", headers=H, json={"backend": "ollama", "base_url": "http://127.0.0.1:11434/v1", "stages": stages}).json()
+    assert a["base_url"] == "http://127.0.0.1:11434/v1" and "OPENAI_API_KEY=sk-new" in (config.PROFILE / ".env").read_text()
+
+
+def test_claude_sign_in_helper(env, monkeypatch):
+    import subprocess
+    from jobpipe import llm
+    c = env["client"]
+
+    def missing():
+        raise RuntimeError("Claude Code CLI not found.")
+    monkeypatch.setattr(llm, "find_claude", missing)
+    assert c.get("/api/ai/claude", headers=H).json() == {"found": None, "error": "Claude Code CLI not found."}
+    assert "Install the Claude app" in c.post("/api/ai/claude-login", headers=H).json()["detail"]
+
+    monkeypatch.setattr(llm, "find_claude", lambda: "/Apps/Claude Code/claude")
+    opened = []
+    monkeypatch.setattr(subprocess, "run", lambda args, **kw: opened.append(args))
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert c.post("/api/ai/claude-login", headers=H).json() == {"opened": True}
+    script = config.DATA / "claude-sign-in.command"
+    assert opened == [["open", "-a", "Terminal", str(script)]]
+    assert "exec '/Apps/Claude Code/claude'" in script.read_text() and script.stat().st_mode & 0o100
+
+
+def test_other_keys(env, monkeypatch):
+    monkeypatch.delenv("JOBSPIPE_API_KEY", raising=False)
+    c = env["client"]
+    k = {x["name"]: x for x in c.get("/api/keys", headers=H).json()["keys"]}
+    assert not k["JOBSPIPE_API_KEY"]["set"] and k["NOTION_TOKEN"]["restart"]
+    assert c.put("/api/keys", headers=H, json={"name": "PATH", "value": "x"}).status_code == 400
+    k = {x["name"]: x for x in c.put("/api/keys", headers=H, json={"name": "JOBSPIPE_API_KEY", "value": "jp_live_1"}).json()["keys"]}
+    assert k["JOBSPIPE_API_KEY"]["set"] and "jp_live_1" not in str(k)
+    assert "JOBSPIPE_API_KEY=jp_live_1" in (config.PROFILE / ".env").read_text()

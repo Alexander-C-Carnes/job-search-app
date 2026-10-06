@@ -1,0 +1,405 @@
+/* Transit: the pipeline is a transit line. Stations are roundels joined by a thick cased line, the list is
+   a departures board, the fit is a platform number, a role's status is its line colour with its word, and
+   the detail header is a station sign. A split-flap board announces an application; a very fat cat on a
+   platform bench takes a rejection. Everything here is scoped to html[data-theme="transit"] and only
+   re-dresses app.css's elements; transit.js draws the moments. */
+
+@font-face { font-family: "Barlow"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(../fonts/barlow-400-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Barlow"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url(../fonts/barlow-500-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Barlow Condensed"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url(../fonts/barlow-condensed-600-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Barlow Condensed"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url(../fonts/barlow-condensed-700-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+html[data-theme="transit"] {
+  --paper: #EEF3F8; --panel: #FFFFFF; --panel-2: #F6F9FC; --ink: #0B1F3A; --muted: #4A5A70; --faint: #6B7A90;
+  --line: #D5DEE8; --edge: #7D8BA0; --tint: #E6EDF4; --accent: #0066CC; --link: #0066CC; --sel: #F6F9FC; --star: #DDAA00;
+  --good: #0B7A47; --warn: #8A3A0B; --bad: #B3261E;
+  --add-bg: #E2F4EC; --add-ink: #0B5C3A; --del-bg: #FDF0E6; --del-ink: #8A3A0B;
+  --fit-hi-bg: #0B1F3A; --fit-hi: #FFFFFF; --fit-mid-bg: #6B7A90; --fit-mid: #FFFFFF; --fit-lo-bg: #CBD5E0; --fit-lo: #0B1F3A;
+  --st-untracked: #6B7A90; --st-not-started: #DDAA00; --st-in-progress: #F4520A; --st-blocked: #57ADDB;
+  --st-applied: #00A862; --st-done: #0066CC; --st-denied: #AC64BB; --st-not-applying: #925720;
+  --board: #0E1E38; --board-cell: #1A2C4C; --board-text: #FFD60A;
+  --shadow: 0 1px 0 rgba(11, 31, 58, .08), 0 6px 18px rgba(11, 31, 58, .08);
+  --radius: 6px;
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Barlow", "Arial Narrow", system-ui, sans-serif;
+  color-scheme: light;
+}
+/* the colour of words drawn on a stage's colour: ink on most lines, white only where ink is too dark (Done, Not Applying) */
+html[data-theme="transit"] [data-stage], html[data-theme="transit"] .quick[data-to] { --on: var(--ink); }
+html[data-theme="transit"] [data-stage="Done"], html[data-theme="transit"] [data-stage="Not Applying"],
+html[data-theme="transit"] .quick[data-to="Done"], html[data-theme="transit"] .quick[data-to="Not Applying"] { --on: #FFFFFF; }
+html[data-theme="transit"] .quick[data-to="Not started"] { --c: var(--st-not-started); }
+html[data-theme="transit"] .quick[data-to="In progress"] { --c: var(--st-in-progress); }
+html[data-theme="transit"] .quick[data-to="Blocked"] { --c: var(--st-blocked); }
+html[data-theme="transit"] .quick[data-to="Applied"] { --c: var(--st-applied); }
+html[data-theme="transit"] .quick[data-to="Denied"] { --c: var(--st-denied); }
+html[data-theme="transit"] .quick[data-to="Done"] { --c: var(--st-done); }
+html[data-theme="transit"] .quick[data-to="Not Applying"] { --c: var(--st-not-applying); }
+
+html[data-theme="transit"] body { font-family: var(--body); font-size: 14px; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+html[data-theme="transit"] :is(h1, h2, h3):not(.markdown *, .wysiwyg *, .doc-preview *, .posting-body *, .changes *) { font-family: var(--display); font-weight: 700; line-height: 1.1; letter-spacing: 0; }
+html[data-theme="transit"] :focus-visible { outline: 3px solid var(--link); outline-offset: 2px; border-radius: 3px; }
+html[data-theme="transit"] code, html[data-theme="transit"] kbd { font-size: 12px; }
+
+/* top bar: a station's name board, the active tab underlined in line blue */
+html[data-theme="transit"] .topbar { height: 54px; gap: 14px; background: var(--panel); border-bottom: 2px solid var(--ink); }
+html[data-theme="transit"] .brand { font: 700 21px var(--display); letter-spacing: .01em; gap: 10px; }
+html[data-theme="transit"] .brand-mark { position: relative; width: 20px; height: 20px; border-radius: 50%; border: 4px solid var(--st-done); background: var(--panel); box-shadow: 0 0 0 1.5px var(--ink); }
+html[data-theme="transit"] .brand-mark::after { content: ""; position: absolute; left: -7px; right: -7px; top: 50%; height: 4px; margin-top: -2px; background: var(--ink); }
+html[data-theme="transit"] .tabs { gap: 2px; }
+html[data-theme="transit"] .tabs button { padding: 0 7px; font: 600 16px var(--display); color: var(--muted); border-bottom: 4px solid transparent; border-top: 4px solid transparent; display: inline-flex; align-items: center; gap: 6px; }
+html[data-theme="transit"] .tabs button:hover { color: var(--ink); }
+html[data-theme="transit"] .tabs button.active { color: var(--ink); border-bottom-color: var(--st-done); font-weight: 700; }
+html[data-theme="transit"] .count { min-width: 22px; height: 20px; padding: 0 6px; margin-left: 0; border-radius: 999px; background: var(--ink); color: #fff; font: 600 13px/20px var(--display); }
+html[data-theme="transit"] .pill { border: 1.5px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 13px; }
+html[data-theme="transit"] .pill.live { border-color: var(--st-applied); color: var(--ink); background: var(--panel); }
+html[data-theme="transit"] .icon-btn:hover { background: var(--tint); }
+html[data-theme="transit"] .banner { background: #FFF7D6; color: #6B4D00; border-bottom: 1.5px solid var(--st-not-started); }
+
+/* buttons: signage with a line-coloured bar on the left; fields with a rule border */
+html[data-theme="transit"] button.primary, html[data-theme="transit"] button.ghost {
+  position: relative; border-radius: var(--radius); border: 1.5px solid var(--ink); background: var(--panel); color: var(--ink);
+  padding: 0 12px 0 0; min-height: 34px; font: 600 15px var(--display); gap: 8px; overflow: hidden; }
+html[data-theme="transit"] :is(button.primary, button.ghost)::before { content: ""; display: block; align-self: stretch; width: 8px; flex: none; margin-right: 2px; background: var(--c, var(--faint)); }
+html[data-theme="transit"] button.primary { background: var(--ink); color: #fff; }
+html[data-theme="transit"] button.primary::before { background: var(--c, var(--st-applied)); }
+html[data-theme="transit"] button.primary:hover:not(:disabled) { opacity: 1; background: #142B4F; }
+html[data-theme="transit"] button.ghost { border-color: var(--edge); }
+html[data-theme="transit"] button.ghost:hover:not(:disabled) { background: var(--panel-2); border-color: var(--ink); }
+html[data-theme="transit"] button.small { min-height: 28px; font-size: 14px; padding-right: 10px; }
+html[data-theme="transit"] button.small::before { width: 6px; }
+html[data-theme="transit"] button.danger { color: var(--bad); }
+html[data-theme="transit"] button.danger::before { background: var(--bad); }
+html[data-theme="transit"] .seg { border: 1.5px solid var(--ink); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+html[data-theme="transit"] .seg button { border: 0; border-radius: 0; margin-left: 0; min-height: 31px; padding: 0 12px; font: 600 15px var(--display); color: var(--ink); background: var(--panel); }
+html[data-theme="transit"] .seg button + button { border-left: 1.5px solid var(--line); }
+html[data-theme="transit"] .seg button.active { background: var(--ink); color: #fff; }
+html[data-theme="transit"] #find-seg b { font: 600 14px var(--display); color: var(--muted); }
+html[data-theme="transit"] .seg button.active b { color: var(--board-text); }
+html[data-theme="transit"] :is(input[type=search], input[type=text], input[type=number], input[type=url], input[type=email], input[type=tel], input:not([type]), textarea, select) {
+  border: 1.5px solid var(--edge); border-radius: var(--radius); padding: 6px 10px; }
+html[data-theme="transit"] :is(input, textarea, select):focus { border-color: var(--ink); outline: none; box-shadow: 0 0 0 3px rgba(0, 102, 204, .25); }
+html[data-theme="transit"] .searchbox input { height: 36px; padding: 0 44px 0 12px; font-size: 14px; }
+html[data-theme="transit"] .searchbox kbd { border: 1px solid var(--line); border-radius: 4px; font: 500 12px var(--body); color: var(--muted); background: var(--panel-2); }
+html[data-theme="transit"] .link-btn { color: var(--link); font-weight: 500; }
+html[data-theme="transit"] label { color: var(--muted); }
+
+/* tools row and chips */
+html[data-theme="transit"] .jobs-tools { background: var(--paper); border-bottom: 0; padding: 12px 16px 6px; gap: 10px; }
+html[data-theme="transit"] .chips { gap: 8px; }
+html[data-theme="transit"] .chip { min-height: 32px; padding: 0 11px; border: 1.5px solid var(--edge); background: var(--panel); color: var(--ink); font-weight: 500; }
+html[data-theme="transit"] .chip:hover { border-color: var(--ink); }
+html[data-theme="transit"] .chip b { font: 600 14px var(--display); color: var(--muted); }
+html[data-theme="transit"] .chip[data-flag="starred"] .ico svg { fill: var(--star); stroke: var(--ink); stroke-width: 1.4; }
+html[data-theme="transit"] .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+html[data-theme="transit"] .chip[aria-pressed="true"] b { color: var(--board-text); }
+html[data-theme="transit"] .chip.round-chip[aria-pressed="false"] { color: var(--ink); }
+html[data-theme="transit"] .chip.round-chip[aria-pressed="false"]::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--r); box-shadow: 0 0 0 1.5px var(--ink); }
+
+/* the pipeline: a transit line on a white sign. The main line runs through the four path stations;
+   the three exits sit on a siding below it, reached by a curve after Done. Each station is a roundel
+   with its count, its line colour as the ring and ink as the casing, over its name. */
+html[data-theme="transit"] .stage-wrap { flex: 1 1 620px; min-width: 0; }
+html[data-theme="transit"] .stages { position: relative; display: flex; align-items: flex-start; background: var(--panel); border: 0; border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1.5px var(--line); overflow: visible; padding: 6px 10px 4px 12px; }
+html[data-theme="transit"] .stages::before { content: ""; position: absolute; left: 10px; top: 16px; width: 6px; height: 27px; border-radius: 3px; background: var(--ink); z-index: 1; }
+html[data-theme="transit"] .stage { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0;
+  padding: 4px 6px 4px; border: 0; background: none; text-align: center; border-radius: 4px; }
+html[data-theme="transit"] .stage:hover { background: none; }
+html[data-theme="transit"] .stage:hover .l { text-decoration: underline; text-underline-offset: 2px; }
+html[data-theme="transit"] .stage[data-kind="path"] { flex: 1 1 0; min-width: 94px; }
+html[data-theme="transit"] .stage[data-kind="side"] { flex: 0 0 84px; padding-top: 32px; }
+html[data-theme="transit"] .stage[data-stage="Not started"] { order: 1; }
+html[data-theme="transit"] .stage[data-stage="In progress"] { order: 2; }
+html[data-theme="transit"] .stage[data-stage="Applied"] { order: 3; }
+html[data-theme="transit"] .stage[data-stage="Done"] { order: 4; }
+html[data-theme="transit"] .stage[data-stage="Blocked"] { order: 5; margin-left: 30px; }
+html[data-theme="transit"] .stage[data-stage="Denied"] { order: 6; }
+html[data-theme="transit"] .stage[data-stage="Not Applying"] { order: 7; }
+/* the line: each station draws the segment leaving it, in its colour, with an ink casing */
+html[data-theme="transit"] .stage::before { content: ""; position: absolute; left: 50%; width: 100%; top: 19.5px; height: 9px; background: var(--c);
+  box-shadow: 0 -2.5px 0 var(--ink), 0 2.5px 0 var(--ink); z-index: 0; }
+html[data-theme="transit"] .stage[data-stage="Not started"]::after { content: ""; position: absolute; left: 0; right: 50%; top: 19.5px; height: 9px; background: var(--c);
+  box-shadow: 0 -2.5px 0 var(--ink), 0 2.5px 0 var(--ink); z-index: 0; }
+html[data-theme="transit"] .stage[data-stage="Done"]::before { width: 50%; }
+html[data-theme="transit"] .stage[data-kind="side"]::before { top: 42.5px; height: 7px; box-shadow: 0 -2px 0 var(--ink), 0 2px 0 var(--ink); }
+html[data-theme="transit"] .stage[data-stage="Blocked"]::before { background: repeating-linear-gradient(90deg, var(--c) 0 10px, var(--panel) 10px 16px); }
+html[data-theme="transit"] .stage[data-stage="Not Applying"]::before { width: calc(50% - 6px); }
+html[data-theme="transit"] .stage[data-stage="Not Applying"]::after { content: ""; position: absolute; right: 3px; top: 34px; width: 6px; height: 24px; border-radius: 3px; background: var(--ink); z-index: 1; }
+/* the curve from the main line down to the siding (ink casing, Done's blue inside) */
+html[data-theme="transit"] .stage[data-stage="Blocked"]::after { content: ""; position: absolute; left: -32px; width: 74px; top: 17px; height: 32px; z-index: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 74 32' preserveAspectRatio='none'%3E%3Cpath d='M0 7 C20 7 24 29 44 29 L74 29' fill='none' stroke='%230B1F3A' stroke-width='12'/%3E%3Cpath d='M0 7 C20 7 24 29 44 29 L74 29' fill='none' stroke='%230066CC' stroke-width='7'/%3E%3C/svg%3E") no-repeat; background-size: 100% 100%; }
+/* the stations */
+html[data-theme="transit"] .stage .n { position: relative; z-index: 1; width: 40px; height: 40px; border-radius: 50%; border: 5px solid var(--c); background: var(--panel);
+  box-shadow: 0 0 0 2px var(--ink); display: grid; place-items: center; font: 700 16px/1 var(--display); color: var(--ink); letter-spacing: -.02em; }
+html[data-theme="transit"] .stage[data-kind="side"] .n { width: 28px; height: 28px; border-width: 4px; font-size: 13px; box-shadow: 0 0 0 1.5px var(--ink); }
+html[data-theme="transit"] .stage[data-stage="Blocked"] .n { border-style: dashed; }
+html[data-theme="transit"] .stage .l { position: relative; z-index: 1; font: 600 14px/1.1 var(--display); color: var(--ink); max-width: 100%; }
+html[data-theme="transit"] .stage[data-kind="side"] .l { font-size: 13px; }
+html[data-theme="transit"] .stage[aria-pressed="true"] { background: none; }
+html[data-theme="transit"] .stage[aria-pressed="true"] .n { background: var(--c); color: var(--on); }
+html[data-theme="transit"] .stage[aria-pressed="true"] .l { color: var(--ink); font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; text-decoration-color: var(--c); }
+html[data-theme="transit"] .stage[aria-pressed="true"][data-stage="Not started"] .l, html[data-theme="transit"] .stage[aria-pressed="true"][data-stage="Blocked"] .l { text-decoration-color: var(--ink); }
+html[data-theme="transit"] .stage:focus-visible { outline-offset: -3px; }
+html[data-theme="transit"] .stage .n.pop { animation: transit-pop .5s ease; }
+html[data-theme="transit"] .stage-meter { display: none; }
+
+/* the list: a departures board. Platform-number tiles for the fit, a line tag for the status. */
+html[data-theme="transit"] .joblist { border-right: 0; background: var(--panel); margin: 0 0 0 16px; border-radius: var(--radius) var(--radius) 0 0; box-shadow: inset 0 0 0 1.5px var(--line); }
+html[data-theme="transit"] .list-head { border-bottom: 2px solid var(--ink); padding: 8px 14px; font: 600 14px var(--display); color: var(--muted); margin: 0 1.5px; }
+html[data-theme="transit"] .list-head select { padding: 2px 6px; font: 500 13px var(--body); }
+html[data-theme="transit"] .batch { background: var(--tint); border-bottom: 1.5px solid var(--line); }
+html[data-theme="transit"] .jobs { padding: 0 1.5px 1.5px; }
+html[data-theme="transit"] .jobs li { grid-template-columns: 15px 44px minmax(0, 1fr) auto; gap: 10px; padding: 10px 10px 10px 10px; border-bottom: 1px solid var(--line); border-left: 5px solid transparent; }
+html[data-theme="transit"] .jobs li:hover { background: var(--panel-2); }
+html[data-theme="transit"] .jobs li.selected { background: var(--panel-2); border-left-color: var(--st-done); }
+html[data-theme="transit"] .jobs li.group-head { background: var(--tint); border-left-color: transparent; }
+html[data-theme="transit"] .jobs li .pick { margin-top: 14px; accent-color: var(--ink); }
+html[data-theme="transit"] .t { font-weight: 500; font-size: 15px; line-height: 1.25; }
+html[data-theme="transit"] .s { font-size: 13.5px; color: var(--muted); margin-top: 1px; }
+html[data-theme="transit"] .tags { margin-top: 6px; gap: 4px 6px; }
+html[data-theme="transit"] .list-empty { color: var(--muted); }
+html[data-theme="transit"] .col-group { font: 600 12px var(--display); letter-spacing: .06em; }
+
+/* fit tiles: the platform number. A full score is solid; a quick one has a dashed edge. */
+html[data-theme="transit"] .fit { width: 44px; height: 44px; border-radius: 4px; font: 700 23px var(--display); background: var(--panel); color: var(--muted); border: 2px dashed var(--faint); }
+html[data-theme="transit"] .fit.hi { background: var(--fit-hi-bg); color: var(--fit-hi); border-color: var(--ink); }
+html[data-theme="transit"] .fit.mid { background: var(--fit-mid-bg); color: var(--fit-mid); border-color: var(--fit-mid-bg); }
+html[data-theme="transit"] .fit.lo { background: var(--fit-lo-bg); color: var(--fit-lo); border-color: var(--fit-lo-bg); }
+html[data-theme="transit"] .fit.hi:not(.full) { border-color: #fff; box-shadow: 0 0 0 2px var(--ink); }
+html[data-theme="transit"] .fit.full { border-style: solid; box-shadow: none; }
+html[data-theme="transit"] .fit.big { width: 48px; height: 48px; border-radius: 5px; font-size: 25px; }
+html[data-theme="transit"] .fit.huge { width: 84px; height: 84px; border-radius: 6px; font-size: 42px; padding-top: 16px; }
+html[data-theme="transit"] .fit.huge small { font-size: 15px; font-weight: 600; }
+html[data-theme="transit"] .kcard .fit { width: 36px; height: 36px; font-size: 19px; }
+html[data-theme="transit"] .run-results .fit { width: 30px; height: 30px; font-size: 15px; }
+
+/* tags: the status as a line tag (a coloured bar with its word); the rest as quiet tiles */
+html[data-theme="transit"] .tag { font-size: 12.5px; line-height: 20px; padding: 0 7px; border: 0; border-radius: 4px; background: var(--tint); color: var(--muted); }
+html[data-theme="transit"] .stage-tag { background: none; padding: 0; gap: 7px; font: 600 14px/20px var(--display); color: var(--ink); }
+html[data-theme="transit"] .stage-tag::before { content: ""; width: 22px; height: 8px; border-radius: 4px; background: var(--c); box-shadow: 0 0 0 1.5px var(--ink); flex: none; }
+html[data-theme="transit"] .stage-tag[data-stage="Blocked"]::before { background: repeating-linear-gradient(90deg, var(--c) 0 5px, var(--panel) 5px 8px); }
+html[data-theme="transit"] .tag.ok { background: var(--add-bg); color: var(--add-ink); }
+html[data-theme="transit"] .tag.ref { background: #E3EEFA; color: #0B4A8A; }
+html[data-theme="transit"] .tag.warn-tag { background: var(--del-bg); color: var(--del-ink); }
+html[data-theme="transit"] .tag.round-tag { background: color-mix(in srgb, var(--r) 12%, var(--panel)); color: var(--ink); border: 0; }
+html[data-theme="transit"] .tag.round-tag b { color: var(--muted); }
+html[data-theme="transit"] .ref-chip { border: 1.5px solid var(--line); color: var(--link); }
+
+/* the board: platforms, the line colour along the top, the count in a roundel */
+html[data-theme="transit"] .board { padding: 10px 16px 14px; gap: 10px; }
+html[data-theme="transit"] .col { background: var(--panel); border: 1.5px solid var(--line); border-top: 8px solid var(--c); border-radius: var(--radius); }
+html[data-theme="transit"] .col[data-stage="Blocked"] { border-top-style: dashed; }
+html[data-theme="transit"] .col[data-stage="Blocked"], html[data-theme="transit"] .col[data-stage="Denied"], html[data-theme="transit"] .col[data-stage="Not Applying"] { background: var(--panel-2); }
+html[data-theme="transit"] .col header { padding: 10px 12px 8px; font: 700 18px var(--display); gap: 8px; }
+html[data-theme="transit"] .col header .dot { display: none; }
+html[data-theme="transit"] .col header .n { order: -1; margin-left: 0; width: 26px; height: 26px; border-radius: 50%; border: 4px solid var(--c); background: var(--panel); box-shadow: 0 0 0 1.5px var(--ink);
+  display: grid; place-items: center; font: 700 12px/1 var(--display); color: var(--ink); flex: none; }
+html[data-theme="transit"] .col[data-stage="Blocked"] header .n { border-style: dashed; }
+html[data-theme="transit"] .col.over { background: var(--panel); outline: 0; box-shadow: inset 0 0 0 3px var(--c); }
+html[data-theme="transit"] .col-empty { color: var(--muted); border: 1.5px dashed var(--line); border-radius: 4px; margin: 2px; }
+html[data-theme="transit"] .kcard { grid-template-columns: 36px minmax(0, 1fr) auto; border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 4px 8px 8px; }
+html[data-theme="transit"] .kcard:hover { border-color: var(--faint); }
+html[data-theme="transit"] .kcard.selected { border-color: var(--st-done); box-shadow: inset 0 0 0 1px var(--st-done); }
+html[data-theme="transit"] .kcard .t { font-size: 14px; }
+
+/* the detail: the status menu is the station sign; the stage path is a line diagram */
+html[data-theme="transit"] .detail { background: var(--paper); }
+html[data-theme="transit"] .jobs-body.view-list .detail { padding: 0 16px 0 12px; }
+html[data-theme="transit"] .dhead { background: var(--panel); border-bottom: 1.5px solid var(--line); border-radius: var(--radius) var(--radius) 0 0; padding: 16px 20px 14px; box-shadow: inset 0 0 0 1.5px var(--line); }
+html[data-theme="transit"] .dhead h2 { font-size: 26px; }
+html[data-theme="transit"] .dhead .sub { font-size: 14px; }
+html[data-theme="transit"] .dhead .bar { gap: 8px 12px; }
+html[data-theme="transit"] select.status-select { background: var(--c); color: var(--on); border: 1.5px solid var(--ink); border-radius: var(--radius); font: 700 19px/1 var(--display); padding: 7px 34px 7px 12px; letter-spacing: .01em;
+  appearance: none; -webkit-appearance: none; background-repeat: no-repeat; background-position: right 12px center; background-size: 11px 7px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%230B1F3A' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+html[data-theme="transit"] select.status-select[data-stage="Done"], html[data-theme="transit"] select.status-select[data-stage="Not Applying"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23ffffff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+html[data-theme="transit"] select.status-select[data-stage="Blocked"] { border-style: dashed; }
+html[data-theme="transit"] select.status-select option { background: var(--panel); color: var(--ink); font: 500 14px var(--body); }
+html[data-theme="transit"] select.status-select:focus { box-shadow: 0 0 0 3px rgba(0, 102, 204, .35); border-color: var(--ink); }
+html[data-theme="transit"] .score { font-size: 13px; }
+html[data-theme="transit"] .score b { font: 700 15px var(--display); }
+html[data-theme="transit"] .subtabs { background: var(--panel); border-bottom: 1.5px solid var(--line); gap: 16px; box-shadow: inset 1.5px 0 0 var(--line), inset -1.5px 0 0 var(--line); }
+html[data-theme="transit"] .subtabs button { font: 600 15px var(--display); color: var(--muted); padding: 10px 2px 8px; border-bottom: 3px solid transparent; }
+html[data-theme="transit"] .subtabs button.active { color: var(--ink); border-bottom-color: var(--st-done); font-weight: 700; }
+html[data-theme="transit"] .subpanel { background: var(--panel); box-shadow: inset 0 0 0 1.5px var(--line); border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; margin-bottom: 14px; }
+html[data-theme="transit"] .jobs-body.view-board .dhead, html[data-theme="transit"] .jobs-body.view-board .subpanel { border-radius: 0; margin-bottom: 0; }
+html[data-theme="transit"] .posting-pane { border-right-color: var(--line); }
+html[data-theme="transit"] .posting-body { font-size: 14.5px; }
+html[data-theme="transit"] .card, html[data-theme="transit"] .pcard, html[data-theme="transit"] .scard, html[data-theme="transit"] .look-option { border: 1.5px solid var(--line); border-radius: var(--radius); }
+html[data-theme="transit"] .notice { border: 1.5px dashed var(--faint); border-radius: var(--radius); background: var(--panel-2); }
+html[data-theme="transit"] .card h3, html[data-theme="transit"] .notice h3 { font-size: 16px; }
+html[data-theme="transit"] .card.is-good { border-top: 5px solid var(--st-applied); }
+html[data-theme="transit"] .card.is-warn { border-top: 5px solid var(--st-not-started); }
+html[data-theme="transit"] .band { font: 600 16px var(--display); color: var(--muted); }
+html[data-theme="transit"] .pdfbar { background: var(--panel-2); border-bottom: 1.5px solid var(--line); font: 600 14px var(--display); }
+html[data-theme="transit"] .pdfpane iframe { background: var(--line); }
+html[data-theme="transit"] .diff { border: 1.5px solid var(--line); border-radius: 4px; }
+html[data-theme="transit"] .history .v { font: 700 14px/20px var(--display); background: var(--tint); border-radius: 4px; text-align: center; padding: 0 6px; }
+html[data-theme="transit"] .sources th { font: 600 13px var(--display); }
+html[data-theme="transit"] .scorecard .score-head h3 { font: 600 12px var(--display); letter-spacing: .08em; }
+
+/* the stage path: the main line as a diagram, the step reached as a roundel; the exits as line tags */
+html[data-theme="transit"] .stage-path { margin-top: 14px; gap: 8px; }
+html[data-theme="transit"] .path-line { max-width: 560px; }
+html[data-theme="transit"] .path-line::before { top: 10px; height: 9px; border-radius: 4.5px; background: var(--ink); left: 12.5%; right: 12.5%; }
+html[data-theme="transit"] .path-line .step::before { content: ""; position: absolute; left: 50%; width: 100%; top: 12px; height: 5px; background: var(--tint); z-index: 0; }
+html[data-theme="transit"] .path-line .step:last-child::before { display: none; }
+html[data-theme="transit"] .path-line .step.reached::before { background: var(--c); }
+html[data-theme="transit"] .path-line .dot { position: relative; z-index: 1; width: 20px; height: 20px; background: var(--panel); box-shadow: inset 0 0 0 3px var(--line), 0 0 0 1.5px var(--faint); }
+html[data-theme="transit"] .path-line .step.reached .dot { background: var(--panel); box-shadow: inset 0 0 0 4px var(--c), 0 0 0 1.5px var(--ink); }
+html[data-theme="transit"] .path-line .step.current .dot { width: 26px; height: 26px; margin: -3px 0; background: var(--panel); box-shadow: inset 0 0 0 5px var(--c), 0 0 0 2px var(--ink); }
+html[data-theme="transit"] .path-line .step-name { font: 600 13px var(--display); color: var(--muted); }
+html[data-theme="transit"] .path-line .step.current .step-name { font-weight: 700; }
+html[data-theme="transit"] .exits-line { font: 600 13px var(--display); color: var(--muted); gap: 14px; }
+html[data-theme="transit"] .exits-line .lead { letter-spacing: .06em; text-transform: uppercase; font-size: 12px; }
+html[data-theme="transit"] .xstep { gap: 7px; }
+html[data-theme="transit"] .xstep i { width: 18px; height: 7px; border-radius: 4px; background: var(--panel); box-shadow: inset 0 0 0 2px var(--line); }
+html[data-theme="transit"] .xstep[data-stage="Blocked"].taken i { background: repeating-linear-gradient(90deg, var(--c) 0 4px, var(--panel) 4px 7px); }
+html[data-theme="transit"] .xstep.taken i { background: var(--c); box-shadow: 0 0 0 1.5px var(--ink); }
+html[data-theme="transit"] .xstep.taken { color: var(--ink); font-weight: 700; }
+
+/* the résumé meters */
+html[data-theme="transit"] .meter { font-size: 14px; }
+html[data-theme="transit"] .meter.hi { --c: var(--st-applied); }
+html[data-theme="transit"] .meter.mid { --c: var(--st-not-started); }
+html[data-theme="transit"] .meter.lo { --c: var(--st-in-progress); }
+html[data-theme="transit"] .meter .lbl { font: 600 14px var(--display); }
+html[data-theme="transit"] .meter .val { font: 700 17px var(--display); }
+html[data-theme="transit"] .meter .track { height: 10px; border-radius: 5px; background: var(--tint); box-shadow: inset 0 0 0 1.5px var(--ink); }
+html[data-theme="transit"] .meter .track i { border-radius: 5px 0 0 5px; border-right: 1.5px solid var(--ink); box-shadow: inset 0 1.5px 0 var(--ink), inset 0 -1.5px 0 var(--ink), inset 1.5px 0 0 var(--ink); }
+html[data-theme="transit"] .pass { color: var(--good); }
+html[data-theme="transit"] .metrics b { font: 700 14px var(--display); }
+
+/* toasts and the moments */
+html[data-theme="transit"] .toast { background: var(--panel); color: var(--ink); border: 1.5px solid var(--ink); border-radius: var(--radius); padding: 10px 14px 10px 22px; font-weight: 500; overflow: hidden; }
+html[data-theme="transit"] .toast::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 8px; background: var(--ink); }
+html[data-theme="transit"] .toast.error { background: var(--panel); color: var(--bad); }
+html[data-theme="transit"] .toast.error::before { background: var(--bad); }
+html[data-theme="transit"] .moment-banner { background: var(--board); color: #fff; border: 3px solid var(--ink); border-radius: 10px; font: 700 20px var(--display); padding: 12px 24px; }
+html[data-theme="transit"] .moment-banner.done { background: var(--board); }
+html[data-theme="transit"] .transit-moment { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 0 16px; pointer-events: none; }
+html[data-theme="transit"] .transit-board { pointer-events: auto; cursor: pointer; background: var(--board); color: #fff; border: 3px solid var(--ink); border-radius: 10px;
+  padding: 18px 22px 16px; box-shadow: 0 20px 60px rgba(11, 31, 58, .35); max-width: calc(100vw - 32px); animation: transit-slidein .35s ease; }
+html[data-theme="transit"] .transit-board .rail { height: 6px; border-radius: 3px; background: var(--c, var(--st-applied)); margin-bottom: 12px; }
+html[data-theme="transit"] .transit-board .flaps { display: flex; gap: 3px; justify-content: center; flex-wrap: nowrap; perspective: 600px; }
+html[data-theme="transit"] .transit-board .flaps + .flaps { margin-top: 6px; }
+html[data-theme="transit"] .transit-board .flap { width: clamp(14px, 2.2vw, 26px); height: clamp(22px, 3.4vw, 40px); background: var(--board-cell); border-radius: 3px; position: relative;
+  font: 700 clamp(14px, 2.4vw, 30px)/1 var(--display); color: var(--board-text); display: grid; place-items: center; overflow: hidden; transform-style: preserve-3d; }
+html[data-theme="transit"] .transit-board .flap::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(0, 0, 0, .55); }
+html[data-theme="transit"] .transit-board .flap.space { background: transparent; }
+html[data-theme="transit"] .transit-board .flap.space::after { display: none; }
+html[data-theme="transit"] .transit-board .flap.flipping { animation: transit-flip .09s linear; }
+html[data-theme="transit"] .transit-board .boardmsg { margin-top: 12px; text-align: center; font: 500 17px/1.3 var(--body); opacity: 0; transition: opacity .4s ease; min-height: 22px; }
+html[data-theme="transit"] .transit-board .boardmsg.show { opacity: 1; }
+html[data-theme="transit"] .transit-board.out { animation: transit-fadeout .35s ease forwards; }
+html[data-theme="transit"] .cat-card { width: 560px; border: 1.5px solid var(--ink); border-left: 10px solid var(--st-denied); border-radius: var(--radius); padding: 14px 16px 14px 12px; }
+html[data-theme="transit"] .cat-card .cat-row { gap: 16px; align-items: center; }
+html[data-theme="transit"] .cat-card .cat-art { width: 250px; }
+html[data-theme="transit"] .cat-card .cat-art svg { width: 250px; height: 150px; }
+html[data-theme="transit"] .cat-card p { font-size: 14px; color: var(--muted); }
+html[data-theme="transit"] .cat-card b { font: 700 22px/1.1 var(--display); color: var(--ink); margin-bottom: 4px; }
+html[data-theme="transit"] .cat-transit .ear { transform-box: fill-box; transform-origin: bottom center; animation: transit-droop 1.4s ease-out forwards; }
+html[data-theme="transit"] .cat-transit .ear.r { animation-name: transit-droopr; }
+html[data-theme="transit"] .cat-transit .tail { transform-box: fill-box; transform-origin: 8% 50%; animation: transit-tail 3.2s ease-in-out infinite; }
+html[data-theme="transit"] .cat-transit .sigh { animation: transit-sigh 2.4s ease-out infinite; }
+html[data-theme="transit"] .cat-transit .sigh:nth-child(2) { animation-delay: .25s; }
+html[data-theme="transit"] .cat-transit .sigh:nth-child(3) { animation-delay: .5s; }
+html[data-theme="transit"] .cat-transit .eyes { transform-box: fill-box; transform-origin: center; animation: transit-blink 4s linear infinite; }
+html[data-theme="transit"] .sparkle i { box-shadow: 0 0 0 1px var(--ink); }
+
+@keyframes transit-pop { 0% { transform: scale(1); } 40% { transform: scale(1.3); } 100% { transform: scale(1); } }
+@keyframes transit-flip { 0% { transform: rotateX(0deg); } 50% { transform: rotateX(-90deg); } 100% { transform: rotateX(0deg); } }
+@keyframes transit-slidein { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes transit-fadeout { to { opacity: 0; } }
+@keyframes transit-droop { from { transform: rotate(0deg); } to { transform: rotate(-38deg); } }
+@keyframes transit-droopr { from { transform: rotate(0deg); } to { transform: rotate(38deg); } }
+@keyframes transit-tail { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-14deg); } }
+@keyframes transit-sigh { 0% { opacity: 0; transform: translate(0, 0); } 20% { opacity: .9; } 100% { opacity: 0; transform: translate(-16px, -10px); } }
+@keyframes transit-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+
+/* dialogs, pages, runs, documents, profile */
+html[data-theme="transit"] dialog { border: 2px solid var(--ink); border-radius: var(--radius); padding: 0 18px 18px; }
+html[data-theme="transit"] dialog::backdrop { background: rgba(11, 31, 58, .45); }
+html[data-theme="transit"] dialog h2 { margin: 0 -18px 14px; padding: 10px 18px; background: var(--ink); color: #fff; font-size: 22px; border-radius: 3px 3px 0 0; }
+html[data-theme="transit"] dialog h2 + p { margin: -4px 0 12px; }
+html[data-theme="transit"] .page-head h1, html[data-theme="transit"] .page h1 { font-size: 28px; }
+html[data-theme="transit"] .doc-title h1 { font-size: 24px; }
+html[data-theme="transit"] .pcard h2 { font-size: 20px; }
+html[data-theme="transit"] .scard { border-left: 8px solid var(--line); }
+html[data-theme="transit"] .scard.picked { border-left-color: var(--st-done); }
+html[data-theme="transit"] .scard .nm { font: 600 17px var(--display); }
+html[data-theme="transit"] .run-bar { background: var(--panel); border-top: 2px solid var(--ink); }
+html[data-theme="transit"] .run-bar b { font: 700 15px var(--display); }
+html[data-theme="transit"] .runs li { border-left-width: 5px; }
+html[data-theme="transit"] .runs li.selected { background: var(--panel-2); border-left-color: var(--st-done); }
+html[data-theme="transit"] .runs .st { font: 700 12px var(--display); letter-spacing: .08em; }
+html[data-theme="transit"] .runs .st.running { color: var(--link); }
+html[data-theme="transit"] .runlog-head { border-bottom: 1.5px solid var(--line); }
+html[data-theme="transit"] .doc-head { background: var(--paper); border-bottom: 1.5px solid var(--line); }
+html[data-theme="transit"] .doc-outline { background: var(--paper); }
+html[data-theme="transit"] .doc-outline button:hover { background: var(--tint); }
+html[data-theme="transit"] .doc-conflict { background: var(--del-bg); color: var(--del-ink); }
+html[data-theme="transit"] .save-state { font-size: 13px; }
+html[data-theme="transit"] .look-option[aria-checked="true"] { border-color: var(--st-done); box-shadow: inset 0 0 0 1px var(--st-done); }
+html[data-theme="transit"] .look-name { font: 700 17px var(--display); }
+html[data-theme="transit"] .look-swatches i { border-color: rgba(11, 31, 58, .25); }
+html[data-theme="transit"] .startups-body .round-tile { border-radius: 4px; font: 700 13px var(--display); border: 1.5px solid var(--ink); }
+html[data-theme="transit"] .startups-body .detail .pad { background: var(--panel); }
+html[data-theme="transit"] .roles li { border-top-color: var(--line); }
+html[data-theme="transit"] .line-preview > div { border: 1.5px dashed var(--line); border-radius: 4px; }
+html[data-theme="transit"] .rfile { border-top-color: var(--line); }
+html[data-theme="transit"] .wysiwyg .ProseMirror h1, html[data-theme="transit"] .wysiwyg .ProseMirror h2 { border-bottom-color: var(--line); }
+
+@media (max-width: 1100px) {
+  html[data-theme="transit"] .stage[data-kind="path"] { min-width: 86px; }
+  html[data-theme="transit"] .topbar { gap: 8px; padding: 0 12px; }
+  html[data-theme="transit"] .brand { font-size: 18px; white-space: nowrap; gap: 8px; }
+  html[data-theme="transit"] .tabs { gap: 0; }
+  html[data-theme="transit"] .tabs button { padding: 0 3px; font-size: 14.5px; white-space: nowrap; }
+  html[data-theme="transit"] .pill { padding: 2px 7px; font-size: 12px; }
+}
+@media (max-width: 620px) {
+  html[data-theme="transit"] .cat-card .cat-row { flex-direction: column; align-items: flex-start; }
+}
+/* below 980 the tabs take their own row under the name board */
+@media (max-width: 980px) {
+  html[data-theme="transit"] .topbar { position: relative; flex-wrap: wrap; height: auto; min-height: 54px; padding: 10px 12px 0; row-gap: 2px; }
+  html[data-theme="transit"] .topbar .meta { position: absolute; right: 12px; top: 8px; }
+  html[data-theme="transit"] .tabs { flex-wrap: wrap; flex-basis: 100%; }
+  html[data-theme="transit"] .tabs button { padding: 8px 4px 6px; }
+}
+@media (max-width: 860px) {
+  html[data-theme="transit"] .joblist { margin: 0; border-radius: 0; box-shadow: none; }
+  html[data-theme="transit"] .jobs-body.view-list .detail { padding: 0; }
+}
+@media (max-width: 760px) {
+  /* the exits wrap onto their own siding under the main line */
+  html[data-theme="transit"] .stages { flex-wrap: wrap; row-gap: 6px; }
+  html[data-theme="transit"] .stage[data-kind="path"] { flex: 1 1 22%; min-width: 0; }
+  html[data-theme="transit"] .stage[data-kind="side"] { flex: 1 1 28%; padding-top: 4px; margin-left: 0; }
+  html[data-theme="transit"] .stage[data-kind="side"]::before { top: 15.5px; }
+  html[data-theme="transit"] .stage[data-stage="Blocked"]::after { display: none; }
+  html[data-theme="transit"] .stage[data-stage="Not Applying"]::after { top: 7px; }
+  html[data-theme="transit"] .stage[data-stage="Done"]::before { width: calc(50% - 6px); }
+  html[data-theme="transit"] .stage[data-stage="Done"]::after { content: ""; position: absolute; right: 3px; top: 10.5px; width: 6px; height: 27px; border-radius: 3px; background: var(--ink); z-index: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="transit"] .stage .n.pop, html[data-theme="transit"] .transit-board, html[data-theme="transit"] .transit-board.out,
+  html[data-theme="transit"] .transit-board .flap.flipping { animation: none; }
+  html[data-theme="transit"] .transit-board .boardmsg { transition: none; }
+  html[data-theme="transit"] .cat-transit .ear, html[data-theme="transit"] .cat-transit .ear.r, html[data-theme="transit"] .cat-transit .tail,
+  html[data-theme="transit"] .cat-transit .sigh, html[data-theme="transit"] .cat-transit .eyes { animation: none; }
+  html[data-theme="transit"] .cat-transit .ear { transform: rotate(-30deg); }
+  html[data-theme="transit"] .cat-transit .ear.r { transform: rotate(30deg); }
+  html[data-theme="transit"] .cat-transit .sigh { opacity: .6; }
+}

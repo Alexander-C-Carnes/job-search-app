@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Search</title>
+  <script src="/static/theme-boot.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/themes/sorbet.css">
+  <link rel="stylesheet" href="/static/themes/transit.css">
+  <link rel="stylesheet" href="/static/themes/bauhaus.css">
+  <link rel="stylesheet" href="/static/themes/arcade.css">
+  <script src="/static/theme.js" defer></script>
+  <script src="/static/themes/transit.js" defer></script>
+  <script src="/static/themes/bauhaus.js" defer></script>
+  <script src="/static/themes/arcade.js" defer></script>
+  <script src="/static/app.js" defer></script>
+  <meta name="editor-src" content="/static/vendor/editor.js">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Job Search</div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="tracker" class="active">Tracker <span class="count" id="count-tracker"></span></button>
+      <button role="tab" data-tab="find">Find jobs <span class="count" id="count-find"></span></button>
+      <button role="tab" data-tab="startups">Startups <span class="count" id="count-startups"></span></button>
+      <button role="tab" data-tab="searches">Filters</button>
+      <button role="tab" data-tab="runs">Runs</button>
+      <button role="tab" data-tab="impact">Impact record <span class="dirty-dot hidden" id="impact-dirty" title="Unsaved changes"></span></button>
+      <button role="tab" data-tab="prep">Interview prep <span class="dirty-dot hidden" id="prep-dirty" title="Unsaved changes"></span></button>
+      <button role="tab" data-tab="notes">Confirmed facts</button>
+      <button role="tab" data-tab="profile">Profile</button>
+    </nav>
+    <div class="meta">
+      <button id="run-indicator" class="pill live hidden"></button>
+      <span id="credits" class="pill" title="JobsPipe credits used"></span>
+      <span id="backend" class="pill subtle"></span>
+      <button id="look-btn" class="icon-btn" type="button" title="Change the look (in Profile)" aria-label="Change the look"><span class="ico" data-icon="palette"></span></button>
+    </div>
+  </header>
+
+  <div id="auth-error" class="banner hidden">
+    Open this app with <code>jobsearch run</code>, or the link it prints (it includes your access token).
+  </div>
+  <div id="offline" class="banner hidden">
+    The app can't reach its server, so what you see may be out of date. If it isn't running, start it with <code>jobsearch run</code>. This page reconnects by itself within a few seconds.
+  </div>
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <main>
+    <!-- Jobs -->
+    <section id="tab-jobs" class="tab-panel active">
+      <div class="jobs-tools">
+        <div class="tools-row">
+          <label class="searchbox">
+            <span class="sr-only">Search roles</span>
+            <input id="job-filter" type="search" placeholder="Search roles, companies, locations" autocomplete="off">
+            <kbd>/</kbd>
+          </label>
+          <div class="seg" id="view-seg" role="group" aria-label="View">
+            <button data-view="list" class="active">List</button>
+            <button data-view="board">Board</button>
+          </div>
+          <span id="sync-state" class="sync-state"></span>
+          <button id="refresh-jobs" class="ghost" title="Send changes to Notion and fetch Notion's now">Sync</button>
+          <button id="run-searches" class="ghost hidden">Run filters…</button>
+          <button id="paste-job" class="primary">Add a job…</button>
+        </div>
+        <div class="tools-row">
+          <div class="seg hidden" id="find-seg" role="group" aria-label="Filter new roles"></div>
+          <div class="stage-wrap" id="stage-wrap">
+            <div id="stages" class="stages" role="group" aria-label="Filter by stage"></div>
+            <div id="stage-meter" class="stage-meter" aria-hidden="true"></div>
+          </div>
+          <div id="flags" class="chips" role="group" aria-label="Filter">
+            <button class="chip" data-flag="starred" aria-pressed="false"><span class="ico" data-icon="star"></span>Starred <b></b></button>
+            <button class="chip" data-flag="referral" aria-pressed="false"><span class="ico" data-icon="person"></span>Has referral <b></b></button>
+            <button class="chip" data-flag="remote" aria-pressed="false" title="Fully remote roles only (not hybrid)">Remote <b></b></button>
+            <button class="chip" data-flag="tailored" aria-pressed="false">Tailored <b></b></button>
+            <button class="chip" data-flag="startup" aria-pressed="false" title="Roles at a startup whose funding round is known (see the Startups tab)">Startup <b></b></button>
+          </div>
+        </div>
+      </div>
+      <div id="jobs-body" class="jobs-body view-list">
+        <aside class="joblist">
+          <div class="list-head">
+            <input id="pick-all" type="checkbox" class="pick" aria-label="Select all shown" title="Select all shown">
+            <span id="list-count" class="muted"></span>
+            <label class="inline">Sort
+              <select id="job-sort">
+                <option value="fit">Best fit</option>
+                <option value="newest">Newest</option>
+                <option value="company">Company</option>
+              </select>
+            </label>
+            <label class="inline">Group
+              <select id="job-group">
+                <option value="">None</option>
+                <option value="company">Company</option>
+              </select>
+            </label>
+          </div>
+          <div id="batch" class="batch hidden"></div>
+          <ul id="jobs" class="jobs"></ul>
+        </aside>
+        <div id="board" class="board"></div>
+        <div id="drawer-backdrop" class="drawer-backdrop"></div>
+        <article id="job-detail" class="detail">
+          <div class="empty">Select a role to see its score, posting and résumé.</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Startups -->
+    <section id="tab-startups" class="tab-panel">
+      <div class="jobs-tools">
+        <div class="tools-row">
+          <label class="searchbox">
+            <span class="sr-only">Search startups</span>
+            <input id="startup-filter" type="search" placeholder="Search startups, what they do, where they are" autocomplete="off">
+          </label>
+          <div class="seg" id="startup-views" role="group" aria-label="Which startups"></div>
+          <span id="startup-state" class="sync-state"></span>
+          <button id="startup-refresh" class="ghost" title="Read the funding news, the YC directory and the VC boards again, then the startups' careers boards: roles matching your filters land in Find jobs (free, a few minutes)">Refresh sources</button>
+          <button id="startup-add" class="primary">Add a startup…</button>
+        </div>
+        <div class="tools-row">
+          <div id="rounds" class="chips rounds" role="group" aria-label="Filter by round"></div>
+          <label class="inline">Sort
+            <select id="startup-sort">
+              <option value="newest">Newest raise</option>
+              <option value="amount">Biggest raise</option>
+              <option value="name">Name</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="jobs-body view-list startups-body">
+        <aside class="joblist">
+          <div class="list-head"><span id="startup-count" class="muted"></span></div>
+          <ul id="startups" class="jobs"></ul>
+        </aside>
+        <article id="startup-detail" class="detail">
+          <div class="empty">Select a startup to see its round, what it does and its open roles.</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Searches -->
+    <section id="tab-searches" class="tab-panel">
+      <div class="page">
+        <div class="page-head">
+          <div>
+            <h1>Saved filters</h1>
+            <p class="muted">Each job JobsPipe returns costs 1 credit, once per month. <span id="search-defaults"></span></p>
+          </div>
+          <button id="add-search" class="primary">New filter</button>
+        </div>
+        <div id="searches"></div>
+        <div class="run-bar">
+          <span id="run-summary"></span>
+          <span class="grow"></span>
+          <button data-run="preflight" class="ghost" title="Checks each filter with a 1-job request (at most 1 credit each)">Preflight</button>
+          <button data-run="triage" class="ghost">Search + score</button>
+          <button data-run="full" class="primary">Search + score + tailor top</button>
+          <label class="inline"><span class="sr-only">How many to tailor</span><input id="run-top" type="number" min="0" max="10" value="3"></label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Runs -->
+    <section id="tab-runs" class="tab-panel">
+      <div class="split">
+        <ul id="runs" class="runs"></ul>
+        <div class="runlog">
+          <div class="runlog-head"><span id="runlog-title" class="muted">No run selected.</span>
+            <button id="stop-run" class="ghost hidden">Stop</button></div>
+          <div id="run-results" class="run-results hidden"></div>
+          <pre id="runlog"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Impact record -->
+    <section id="tab-impact" class="tab-panel">
+      <div class="doc">
+        <div class="doc-head">
+          <div class="doc-title">
+            <h1>Impact record</h1>
+            <p class="muted">Every score and résumé is built from this. Changes save as you type, and the next score, tailoring run or résumé edit uses them.</p>
+          </div>
+          <span id="impact-state" class="save-state" role="status"></span>
+          <div class="seg" id="impact-view" role="group" aria-label="View">
+            <button data-view="formatted" title="Edit it formatted, like Typora (⌘/ switches to Markdown)">Formatted</button>
+            <button data-view="edit" title="Edit the Markdown text">Markdown</button>
+            <button data-view="split">Side by side</button>
+          </div>
+          <button id="impact-save" class="primary" title="Save now (⌘S)">Save</button>
+        </div>
+        <div id="impact-conflict" class="doc-conflict hidden" role="alert">
+          <span class="grow">The impact record was changed outside this window since you opened it, so your latest edits haven't been saved.</span>
+          <button data-act="load" class="ghost small">Discard mine, load that version</button>
+          <button data-act="force" class="ghost small danger">Save mine over it</button>
+        </div>
+        <div id="impact-body" class="doc-body">
+          <nav id="impact-outline" class="doc-outline" aria-label="Sections"></nav>
+          <div id="impact-wysiwyg" class="wysiwyg"><div id="impact-editor" class="wysiwyg-doc"></div></div>
+          <textarea id="impact-text" class="doc-text" spellcheck="true" aria-label="Impact record (Markdown)"></textarea>
+          <div id="impact-preview" class="doc-preview markdown"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interview prep -->
+    <section id="tab-prep" class="tab-panel">
+      <div class="doc">
+        <div class="doc-head">
+          <div class="doc-title">
+            <h1>Interview prep</h1>
+            <p class="muted">Stories to find, examples to dig up, questions to get ready for. Changes save as you type. Ask Claude to add something and it shows up here (<code id="prep-path"></code>).</p>
+          </div>
+          <span id="prep-state" class="save-state" role="status"></span>
+          <div class="seg" id="prep-view" role="group" aria-label="View">
+            <button data-view="formatted" title="Edit it formatted, like Typora (⌘/ switches to Markdown)">Formatted</button>
+            <button data-view="edit" title="Edit the Markdown text">Markdown</button>
+            <button data-view="split">Side by side</button>
+          </div>
+          <button id="prep-save" class="primary" title="Save now (⌘S)">Save</button>
+        </div>
+        <div id="prep-conflict" class="doc-conflict hidden" role="alert">
+          <span class="grow">Your interview prep was changed outside this window (by Claude or another editor) since you opened it, so your latest edits haven't been saved.</span>
+          <button data-act="load" class="ghost small">Discard mine, load that version</button>
+          <button data-act="force" class="ghost small danger">Save mine over it</button>
+        </div>
+        <div id="prep-body" class="doc-body">
+          <nav id="prep-outline" class="doc-outline" aria-label="Sections"></nav>
+          <div id="prep-wysiwyg" class="wysiwyg"><div id="prep-editor" class="wysiwyg-doc"></div></div>
+          <textarea id="prep-text" class="doc-text" spellcheck="true" aria-label="Interview prep (Markdown)"></textarea>
+          <div id="prep-preview" class="doc-preview markdown"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Notes -->
+    <section id="tab-notes" class="tab-panel">
+      <div class="page narrow">
+        <h1>Confirmed facts</h1>
+        <p class="muted">Answers to follow-up questions. Every scoring run and résumé edit treats these as user-confirmed evidence, at exactly the scope you write them. Re-tailor a job for its résumé to pick them up.</p>
+        <textarea id="note-text" rows="3" placeholder="e.g. I ran the vendor migration at Northwind, but I didn't manage the vendor's team."></textarea>
+        <div class="actions"><button id="add-note" class="primary">Add fact</button></div>
+        <div id="notes" class="markdown"></div>
+      </div>
+    </section>
+
+    <!-- Profile -->
+    <section id="tab-profile" class="tab-panel">
+      <div class="page profile">
+        <div class="page-head">
+          <div>
+            <h1>Profile</h1>
+            <p class="muted">Who the résumés are for. Every score, résumé and check uses this. Your evidence is in the
+              <button type="button" id="profile-impact-link" class="link-btn inline-link">Impact record</button> tab (<span id="profile-impact"></span>).</p>
+          </div>
+        </div>
+
+        <section class="pcard look-card" id="look-card">
+          <h2>Look</h2>
+          <p class="muted">How the app looks on this computer. Every look has the same tabs, buttons and shortcuts; they differ in colour, type and how they celebrate an application.</p>
+          <div id="look-picker" class="look-picker" role="radiogroup" aria-label="Look"></div>
+        </section>
+
+        <form id="profile-form" class="pview" autocomplete="off" novalidate>
+          <div id="profile-first" class="notice hidden">
+            <h3>Set up your profile</h3>
+            <p id="profile-first-text">No profile is saved yet. Put in your details and save.</p>
+          </div>
+          <section class="pcard">
+            <h2>About you</h2>
+            <div class="row2">
+              <label>Name <input name="name" required placeholder="Your Name"></label>
+              <label>Pronouns <span class="hint">how the prompts refer to you</span>
+                <select name="pronouns"><option>he/him</option><option>she/her</option><option>they/them</option></select></label>
+            </div>
+          </section>
+          <section class="pcard">
+            <h2>Contact line</h2>
+            <p class="muted">Every résumé shows this line under your name. The résumé check fails one without your city and LinkedIn address.</p>
+            <div class="row2">
+              <label>City <span class="hint">City, ST</span><input name="city" placeholder="Portland, OR"></label>
+              <label>Phone <input name="phone" type="tel" placeholder="+1 555-555-5555"></label>
+              <label>Email <input name="email" type="email" placeholder="you@example.com"></label>
+              <label>LinkedIn <input name="linkedin" placeholder="linkedin.com/in/your-name"></label>
+            </div>
+            <div class="line-preview"><span class="hint">Preview</span><div id="contact-preview"></div></div>
+          </section>
+          <section class="pcard">
+            <h2>Your résumés</h2>
+            <p class="muted">Tick the résumés to score each job against, alongside your impact record. Each name labels a column of the heat map. The fallback is where the writers start when the matcher's pick isn't one of these.</p>
+            <ul id="resume-files" class="rfiles"></ul>
+            <div class="rfiles-foot">
+              <button type="button" id="resume-add" class="ghost">Add a résumé (.md)…</button>
+              <input type="file" id="resume-upload" accept=".md,.markdown,text/markdown" hidden>
+              <span class="hint">Saved in your profile folder's <code>references/</code>. Use the markdown shape in the README so it can be rendered.</span>
+            </div>
+          </section>
+          <section class="pcard">
+            <h2>PDF file names</h2>
+            <div class="row2">
+              <label>Prefix <input name="pdf_prefix"></label>
+              <div class="line-preview"><span class="hint">Example</span><div id="pdf-preview"></div></div>
+            </div>
+          </section>
+          <details class="pcard">
+            <summary>How the quick score describes your evidence</summary>
+            <label>Describe your materials <span class="hint">e.g. point at a section of your impact record worth reading in full</span>
+              <textarea name="evidence" rows="2"></textarea></label>
+          </details>
+          <p class="form-error hidden"></p>
+          <div class="run-bar">
+            <span id="profile-state" class="muted"></span>
+            <span class="grow"></span>
+            <button type="button" id="profile-discard" class="ghost" disabled>Discard changes</button>
+            <button class="primary" id="profile-save" disabled>Save profile</button>
+          </div>
+        </form>
+
+        <form id="ai-form" class="pview ai-view" autocomplete="off" novalidate>
+          <section class="pcard">
+            <h2>AI</h2>
+            <p class="muted">Which AI scores jobs and writes your résumés. The app is tuned on Claude. Other AIs work, and every résumé still goes through the same checks, but a weaker model writes weaker résumés.</p>
+            <div class="row2">
+              <label>Provider <select name="backend"></select></label>
+              <label id="ai-key-row">API key <span class="hint" id="ai-key-hint"></span>
+                <input name="key" type="password" autocomplete="new-password" spellcheck="false"></label>
+              <label id="ai-url-row">Address <span class="hint">the API's base URL, ending in /v1</span>
+                <input name="base_url" placeholder="http://localhost:8000/v1" spellcheck="false"></label>
+            </div>
+            <p class="muted ai-note" id="ai-note"></p>
+            <p class="ai-claude hidden" id="ai-claude">
+              <button type="button" id="ai-claude-login" class="ghost">Sign in to Claude…</button>
+              <span class="muted" id="ai-claude-state"></span>
+            </p>
+            <div class="ai-stages" id="ai-stages"></div>
+            <datalist id="ai-models"></datalist>
+            <p class="form-error hidden"></p>
+            <div class="ai-actions">
+              <button type="button" id="ai-check" class="ghost">Check connection</button>
+              <span id="ai-state" class="muted"></span>
+              <span class="grow"></span>
+              <button class="primary" id="ai-save" disabled>Save AI settings</button>
+            </div>
+          </section>
+          <section class="pcard">
+            <h2>Other keys</h2>
+            <p class="muted">For the services besides the AI. They're saved in your profile folder's <code>.env</code> and never shown again.</p>
+            <ul class="keys" id="keys"></ul>
+          </section>
+        </form>
+
+      </div>
+    </section>
+  </main>
+
+  <dialog id="paste-dialog">
+    <form id="paste-form" novalidate>
+      <h2>Add a job</h2>
+      <p class="muted">For a role you found yourself. Paste its link and the app reads the posting from the page.</p>
+      <label>Posting link
+        <span class="url-row">
+          <input name="url" type="url" placeholder="https://" autocomplete="off" spellcheck="false">
+          <button type="button" data-act="read" class="ghost">Read posting</button>
+        </span>
+      </label>
+      <p class="lookup-msg hidden" role="status"></p>
+      <div class="field-pair">
+        <label>Job title <input name="title"></label>
+        <label>Company <input name="company"></label>
+      </div>
+      <label>Location <input name="location" placeholder="Not stated"></label>
+      <input type="hidden" name="remote">
+      <label>Full job description <textarea name="description" rows="10"
+        placeholder="Filled in from the link. If the page can't be read, paste the posting here."></textarea></label>
+      <p class="form-error hidden"></p>
+      <div class="actions">
+        <button type="button" data-act="cancel" class="ghost">Cancel</button>
+        <span class="grow"></span>
+        <button value="score" class="ghost" title="Adds it to Find jobs, then one quick Claude call: how well your impact record fits this posting">Add and score</button>
+        <button value="tailor" class="primary" title="Adds it, then the full run: score, three drafts, merged résumé, PDF and report">Tailor résumé</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="startup-dialog">
+    <form id="startup-form" novalidate>
+      <h2>Add a startup</h2>
+      <p class="muted">One you heard of. With a lookup key in <code>.env</code>, its latest round is looked up from its website.</p>
+      <div class="field-pair">
+        <label>Name <input name="name" required autocomplete="off" maxlength="80"></label>
+        <label>Website <input name="website" inputmode="url" autocomplete="off" placeholder="acme.com"></label>
+      </div>
+      <p class="form-error hidden"></p>
+      <div class="actions">
+        <button type="button" data-act="cancel" class="ghost">Cancel</button>
+        <span class="grow"></span>
+        <button class="primary">Add</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="describe-dialog">
+    <form id="describe-form">
+      <h2>Paste the posting</h2>
+      <p class="muted" id="describe-for"></p>
+      <label>Full job description <textarea name="description" rows="14" required></textarea></label>
+      <p class="form-error hidden"></p>
+      <div class="actions">
+        <button type="button" data-act="cancel" class="ghost">Cancel</button>
+        <span class="grow"></span>
+        <button class="primary" title="Keeps the text with this role, then one quick Claude call scores it">Save and score</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="referral-dialog">
+    <form id="referral-form">
+      <h2>Referral</h2>
+      <p class="muted" id="referral-for"></p>
+      <label>Link <input name="url" inputmode="url" autocomplete="off" required placeholder="https://www.linkedin.com/in/…"></label>
+      <label>Name <span class="hint">optional</span> <input name="name" autocomplete="off" maxlength="120" placeholder="Who is referring you"></label>
+      <p class="form-error hidden"></p>
+      <div class="actions">
+        <button type="button" data-act="remove" class="ghost danger">Remove referral</button>
+        <span class="grow"></span>
+        <button type="button" data-act="cancel" class="ghost">Cancel</button>
+        <button class="primary">Save referral</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="search-dialog">
+    <form id="search-form">
+      <h2></h2>
+      <label>Name <input name="name" required autocomplete="off" placeholder="Director of Engineering, remote"></label>
+      <label>Job titles <span class="hint">one per line; a job matches if its title contains any of them</span>
+        <textarea name="titles" rows="3" required placeholder="Technical Program Manager&#10;Principal Program Manager"></textarea></label>
+      <div class="row3">
+        <label>Work arrangement
+          <select name="mode">
+            <option value="remote">Remote</option>
+            <option value="hybrid">Hybrid</option>
+            <option value="any">Any</option>
+          </select></label>
+        <label>Locations <span class="hint">one per line</span><textarea name="locations" rows="2" placeholder="Anywhere"></textarea></label>
+        <label>Exclude titles <span class="hint">one per line</span><textarea name="exclude_titles" rows="2"></textarea></label>
+      </div>
+      <div class="row3">
+        <label>Minimum pay (USD) <input name="min_salary_usd" type="number" min="0" step="1000"></label>
+        <label>Posted within (days) <input name="posted_within_days" type="number" min="0"></label>
+        <label>Jobs per run <span class="hint">1 credit each</span><input name="limit" type="number" min="1" max="100"></label>
+      </div>
+      <p class="hint">Blank fields use the defaults shown in grey.</p>
+      <p class="form-error hidden"></p>
+      <div class="actions">
+        <button type="button" data-act="cancel" class="ghost">Cancel</button>
+        <button class="primary">Save filter</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

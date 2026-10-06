@@ -1,0 +1,393 @@
+/* Bauhaus: flat colour fields on white, a strict grid, huge black counts, no shadows, no rounded corners.
+   The pipeline is a bar of flat rectangles sized by count; applying wipes the screen green ("APPLIED.");
+   a rejection brings a geometric cat on a blue field. Everything here is scoped to html[data-theme="bauhaus"]
+   and only re-dresses the elements app.css already lays out. The moments' DOM is built by themes/bauhaus.js. */
+
+@font-face { font-family: "Archivo"; font-style: normal; font-weight: 100 900; font-stretch: 100%; font-display: swap;
+  src: url(../fonts/archivo-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Archivo Black"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url(../fonts/archivo-black-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+html[data-theme="bauhaus"] {
+  --white: #FFFFFF; --black: #000000; --yellow: #FFD400; --red: #FF4F1F; --blue: #2E6BFF; --green: #19B36B; --pink: #FF77B7;
+  --grey-warm: #E3D7C3; --grey-blue: #8FA5C6; --grey: #E9E9E9; --grey-soft: #F4F4F4;
+  --paper: #FFFFFF; --panel: #FFFFFF; --panel-2: #F4F4F4; --ink: #000000; --muted: #333333; --faint: #555555;
+  --line: #DADADA; --accent: #000000; --link: #000000; --sel: #F4F4F4; --star: #000000;
+  --good: #0A7A45; --warn: #9A4A00; --bad: #C42B00;
+  --add-bg: #D1F5E1; --add-ink: #000000; --del-bg: #FFDCD1; --del-ink: #000000;
+  --fit-hi-bg: #19B36B; --fit-hi: #000000; --fit-mid-bg: #FFD400; --fit-mid: #000000; --fit-lo-bg: #FF4F1F; --fit-lo: #000000;
+  --st-untracked: #E9E9E9; --st-not-started: #FFD400; --st-in-progress: #FF4F1F; --st-blocked: #E3D7C3;
+  --st-applied: #19B36B; --st-done: #2E6BFF; --st-denied: #8FA5C6; --st-not-applying: #E9E9E9;
+  --rd-pre-seed: #E3D7C3; --rd-seed: #FFD400; --rd-a: #19B36B; --rd-b: #2E6BFF; --rd-c: #FF77B7; --rd-d: #FF4F1F; --rd-growth: #8FA5C6; --rd-unknown: #E9E9E9;
+  --shadow: none;
+  --radius: 0;
+  --rule: 2px solid #000000;
+  --display: "Archivo Black", "Archivo", "Arial Black", Arial, sans-serif;
+  --body: "Archivo", Arial, "Helvetica Neue", Helvetica, sans-serif;
+  color-scheme: light;
+}
+html[data-theme="bauhaus"] body { font-family: var(--body); font-size: 14px; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+html[data-theme="bauhaus"] :is(h1, h2, h3):not(.markdown *, .wysiwyg *, .doc-preview *, .posting-body *, .changes *) { font-family: var(--display); font-weight: 400; letter-spacing: -.01em; }
+html[data-theme="bauhaus"] :focus-visible { outline: 3px solid var(--black); outline-offset: 2px; }
+html[data-theme="bauhaus"] a { color: var(--black); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+html[data-theme="bauhaus"] a:hover { background: var(--yellow); }
+html[data-theme="bauhaus"] .muted { color: var(--muted); }
+html[data-theme="bauhaus"] .hint { color: #444444; font-weight: 400; }
+html[data-theme="bauhaus"] label { color: var(--black); font-weight: 600; }
+html[data-theme="bauhaus"] label > :is(input, textarea, select) { font-weight: 500; }
+html[data-theme="bauhaus"] ::placeholder { color: #555555; opacity: 1; }
+
+/* top bar: a yellow field; the active tab is a white block */
+html[data-theme="bauhaus"] .topbar { height: auto; min-height: 52px; gap: 0 20px; padding: 0 20px; background: var(--yellow); border-bottom: 0; }
+html[data-theme="bauhaus"] .brand { font: 400 20px/1 var(--display); letter-spacing: -.02em; gap: 12px; white-space: nowrap; }
+html[data-theme="bauhaus"] .brand-mark { position: relative; width: 54px; height: 16px; border-radius: 0;
+  background: linear-gradient(var(--red), var(--red)) 19px 0 / 16px 16px no-repeat; }
+html[data-theme="bauhaus"] .brand-mark::before { content: ""; position: absolute; left: 0; top: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--blue); }
+html[data-theme="bauhaus"] .brand-mark::after { content: ""; position: absolute; left: 38px; top: 0; width: 16px; height: 16px; background: var(--black); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+html[data-theme="bauhaus"] .tabs { gap: 2px; align-self: stretch; align-items: stretch; flex-wrap: wrap; }
+html[data-theme="bauhaus"] .tabs button { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 11px; border: 0; color: var(--black); font-weight: 600; font-size: 13.5px; white-space: nowrap; }
+html[data-theme="bauhaus"] .tabs button:hover { color: var(--black); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+html[data-theme="bauhaus"] .tabs button.active { background: var(--white); color: var(--black); font-weight: 700; border-bottom-color: transparent; text-decoration: none; }
+html[data-theme="bauhaus"] .count { margin-left: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 0; background: var(--black); color: var(--white); font: 700 11px/18px var(--body); }
+html[data-theme="bauhaus"] .pill { border: 2px solid var(--black); border-radius: 0; background: transparent; color: var(--black); font-weight: 600; padding: 2px 8px; }
+html[data-theme="bauhaus"] .pill.subtle { color: var(--black); }
+html[data-theme="bauhaus"] .pill.live { background: var(--red); border-color: var(--red); color: var(--black); font-weight: 700; }
+html[data-theme="bauhaus"] .icon-btn { border-radius: 0; color: var(--black); }
+html[data-theme="bauhaus"] .icon-btn:hover { background: var(--black); color: var(--yellow); }
+html[data-theme="bauhaus"] .dirty-dot { width: 7px; height: 7px; border-radius: 0; background: var(--red); }
+html[data-theme="bauhaus"] .banner { background: var(--red); color: var(--black); border-bottom: var(--rule); font-weight: 600; }
+html[data-theme="bauhaus"] .banner code { background: var(--white); padding: 0 4px; }
+
+/* buttons, fields, segmented controls: flat blocks, bottom-rule fields */
+html[data-theme="bauhaus"] button.primary, html[data-theme="bauhaus"] button.ghost, html[data-theme="bauhaus"] .seg button {
+  border-radius: 0; padding: 8px 14px; border: 0; background: var(--grey); color: var(--black); font-weight: 700; font-size: 13px; transition: background-color .12s, color .12s; }
+html[data-theme="bauhaus"] button.primary { background: var(--black); color: var(--white); }
+html[data-theme="bauhaus"] button.primary:hover:not(:disabled) { opacity: 1; background: var(--white); color: var(--black); box-shadow: inset 0 0 0 2px var(--black); }
+html[data-theme="bauhaus"] button.ghost:hover:not(:disabled) { background: var(--black); color: var(--white); border-color: transparent; }
+html[data-theme="bauhaus"] button.small { padding: 5px 10px; font-size: 12px; }
+html[data-theme="bauhaus"] button.danger { background: var(--red); color: var(--black); }
+html[data-theme="bauhaus"] button.danger:hover:not(:disabled) { background: var(--black); color: var(--white); }
+html[data-theme="bauhaus"] .seg { border: var(--rule); }
+html[data-theme="bauhaus"] .seg button { border-radius: 0; margin-left: 0; padding: 6px 12px; background: var(--white); color: var(--black); border-left: var(--rule); }
+html[data-theme="bauhaus"] .seg button:first-child { border-left: 0; }
+html[data-theme="bauhaus"] .seg button:hover:not(.active) { background: var(--grey-soft); }
+html[data-theme="bauhaus"] .seg button.active { background: var(--black); color: var(--white); }
+html[data-theme="bauhaus"] #find-seg b, html[data-theme="bauhaus"] .chip b { font: 700 12px var(--body); color: inherit; }
+html[data-theme="bauhaus"] .link-btn { color: var(--black); border-radius: 0; font-weight: 600; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+html[data-theme="bauhaus"] .link-btn:hover { background: var(--yellow); }
+html[data-theme="bauhaus"] :is(input[type=search], input[type=text], input[type=number], input[type=url], input[type=email], input[type=tel], input:not([type]), select) {
+  border: 0; border-bottom: var(--rule); border-radius: 0; background-color: transparent; color: var(--black); padding: 7px 0; }
+html[data-theme="bauhaus"] :is(input, select):focus { outline: none; box-shadow: 0 2px 0 var(--black); }
+html[data-theme="bauhaus"] textarea { border: var(--rule); border-radius: 0; background: var(--white); color: var(--black); padding: 8px 10px; }
+html[data-theme="bauhaus"] textarea:focus { outline: none; box-shadow: inset 0 0 0 2px var(--black); }
+html[data-theme="bauhaus"] input[type=checkbox], html[data-theme="bauhaus"] input[type=radio] { accent-color: var(--black); }
+html[data-theme="bauhaus"] select:not([multiple]) { appearance: none; -webkit-appearance: none; padding-right: 18px; font-weight: 600;
+  background-image: linear-gradient(45deg, transparent 50%, var(--black) 50%), linear-gradient(135deg, var(--black) 50%, transparent 50%);
+  background-position: right 6px top 50%, right 0 top 50%; background-size: 6px 6px; background-repeat: no-repeat; }
+html[data-theme="bauhaus"] .searchbox input { padding: 8px 36px 8px 0; font-size: 15px; font-weight: 500; }
+html[data-theme="bauhaus"] .searchbox kbd { border: var(--rule); border-radius: 0; background: var(--white); color: var(--black); font: 700 11px/18px var(--body); padding: 0 6px; }
+html[data-theme="bauhaus"] .list-head select { padding: 3px 18px 3px 0; }
+html[data-theme="bauhaus"] .form-error { color: var(--black); background: var(--red); padding: 4px 8px; font-weight: 600; display: inline-block; }
+html[data-theme="bauhaus"] .lookup-msg.warn { color: var(--black); font-weight: 600; }
+html[data-theme="bauhaus"] code, html[data-theme="bauhaus"] kbd { font-size: 12px; }
+
+/* tools row and chips: square chips with black rules, black when on */
+html[data-theme="bauhaus"] .jobs-tools { background: var(--white); border-bottom: var(--rule); padding: 14px 20px 0; gap: 12px; }
+html[data-theme="bauhaus"] .jobs-tools .tools-row:nth-child(2) { flex-wrap: wrap; gap: 0 14px; align-items: center; }
+html[data-theme="bauhaus"] .stage-wrap { flex: 1 1 100%; min-width: 0; order: 1; }
+html[data-theme="bauhaus"] #find-seg { order: 0; margin: 0 auto 12px 0; }
+html[data-theme="bauhaus"] .jobs-tools .chips { order: 2; flex: 1 1 auto; flex-wrap: wrap; gap: 6px; padding: 10px 0 12px; }
+html[data-theme="bauhaus"] #tab-startups .jobs-tools .tools-row:nth-child(2) { gap: 10px 14px; padding-bottom: 12px; }
+html[data-theme="bauhaus"] #tab-startups .jobs-tools .chips { padding: 0; }
+html[data-theme="bauhaus"] .chip { border: var(--rule); border-radius: 0; padding: 6px 11px; background: var(--white); color: var(--black); font-weight: 600; font-size: 13px; }
+html[data-theme="bauhaus"] .chip:hover { background: var(--grey-soft); color: var(--black); border-color: var(--black); }
+html[data-theme="bauhaus"] .chip[aria-pressed="true"] { background: var(--black); border-color: var(--black); color: var(--white); }
+html[data-theme="bauhaus"] .chip[data-flag="starred"][aria-pressed="true"] .ico svg { fill: var(--yellow); stroke: var(--yellow); }
+html[data-theme="bauhaus"] .chip.round-chip::before { content: ""; width: 10px; height: 10px; background: var(--r); flex: none; }
+html[data-theme="bauhaus"] .chip.round-chip[aria-pressed="false"] { color: var(--black); border-color: var(--black); }
+html[data-theme="bauhaus"] .chip.round-chip[aria-pressed="true"] { background: var(--black); border-color: var(--black); color: var(--white); }
+html[data-theme="bauhaus"] .sync-state { color: var(--muted); font-weight: 500; }
+
+/* the pipeline: a full-width bar of flat rectangles, the main line sized by count, the exits as square tiles */
+html[data-theme="bauhaus"] .stages { display: flex; align-items: stretch; height: 84px; background: none; border: 0; border-radius: 0; overflow: visible; }
+html[data-theme="bauhaus"] .stages .stage { position: relative; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 0;
+  padding: 8px 12px 7px; border: 0; border-radius: 0; background: var(--c); color: var(--black); text-align: left; min-width: 0; transition: flex-grow .4s cubic-bezier(.4, 0, .2, 1); }
+html[data-theme="bauhaus"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 96px; }
+html[data-theme="bauhaus"] .stage[data-kind="side"] { flex: 0 0 84px; width: 84px; }
+html[data-theme="bauhaus"] .stage[data-stage="Not started"] { order: 1; }
+html[data-theme="bauhaus"] .stage[data-stage="In progress"] { order: 2; }
+html[data-theme="bauhaus"] .stage[data-stage="Applied"] { order: 3; }
+html[data-theme="bauhaus"] .stage[data-stage="Done"] { order: 4; }
+html[data-theme="bauhaus"] .stage[data-stage="Blocked"] { order: 5; }
+html[data-theme="bauhaus"] .stage[data-stage="Denied"] { order: 6; }
+html[data-theme="bauhaus"] .stage[data-stage="Not Applying"] { order: 7; }
+html[data-theme="bauhaus"] .stage:hover { background: var(--c); }
+html[data-theme="bauhaus"] .stage:hover .l { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px; }
+html[data-theme="bauhaus"] .stage[aria-pressed="true"] { background: var(--c); outline: 4px solid var(--black); outline-offset: -4px; z-index: 1; }
+html[data-theme="bauhaus"] .stage:focus-visible { outline: 4px solid var(--black); outline-offset: 2px; z-index: 2; }
+html[data-theme="bauhaus"] .stage .n { font: 400 56px/.9 var(--display); letter-spacing: -.03em; color: var(--black); }
+html[data-theme="bauhaus"] .stage .l { font-size: 12px; font-weight: 700; color: var(--black); max-width: 100%; }
+html[data-theme="bauhaus"] .stage[data-kind="side"] .n { font-size: 30px; letter-spacing: -.02em; }
+html[data-theme="bauhaus"] .stage[data-kind="side"] .l { font-size: 11px; line-height: 1.1; white-space: normal; overflow: visible; }
+html[data-theme="bauhaus"] .stage[aria-pressed="true"] .n, html[data-theme="bauhaus"] .stage[aria-pressed="true"] .l { color: var(--black); }
+html[data-theme="bauhaus"] .stage-meter { display: none; }
+
+/* the list: rows with black rules, selection as a black left bar */
+html[data-theme="bauhaus"] .joblist { width: 400px; border-right: var(--rule); background: var(--white); }
+html[data-theme="bauhaus"] .list-head { border-bottom: var(--rule); padding: 8px 14px; font-weight: 600; }
+html[data-theme="bauhaus"] .list-head label.inline { font-weight: 600; }
+html[data-theme="bauhaus"] .batch { background: var(--yellow); border-bottom: var(--rule); font-weight: 600; color: var(--black); }
+html[data-theme="bauhaus"] .batch-status { color: var(--black); }
+html[data-theme="bauhaus"] .jobs li { grid-template-columns: 15px 40px minmax(0, 1fr) auto; gap: 12px; padding: 12px 10px 12px 14px; border-left: 0; border-bottom: var(--rule); position: relative; }
+html[data-theme="bauhaus"] .jobs li:hover { background: var(--grey-soft); }
+html[data-theme="bauhaus"] .jobs li.selected { background: var(--white); box-shadow: inset 10px 0 0 var(--black); }
+html[data-theme="bauhaus"] .jobs li.selected .t { font-weight: 700; }
+html[data-theme="bauhaus"] .jobs li.group-head { background: var(--grey); border-left: 0; border-bottom: var(--rule); }
+html[data-theme="bauhaus"] .group-toggle .caret, html[data-theme="bauhaus"] .group-toggle .n { color: var(--black); }
+html[data-theme="bauhaus"] .col-group { color: var(--black); }
+html[data-theme="bauhaus"] .jobs li .pick { margin-top: 12px; }
+html[data-theme="bauhaus"] .t { font-weight: 500; font-size: 14px; }
+html[data-theme="bauhaus"] .s { color: var(--muted); font-size: 12.5px; }
+html[data-theme="bauhaus"] .list-empty { color: var(--black); font-weight: 500; }
+
+/* fit badges: coloured squares with black numbers; the quick score has a cut corner, the full one is solid */
+html[data-theme="bauhaus"] .fit { width: 40px; height: 40px; border-radius: 0; font: 400 18px/1 var(--display); letter-spacing: -.02em; background: var(--grey); color: var(--black); }
+html[data-theme="bauhaus"] .fit.hi { background: var(--green); } html[data-theme="bauhaus"] .fit.mid { background: var(--yellow); } html[data-theme="bauhaus"] .fit.lo { background: var(--red); }
+html[data-theme="bauhaus"] .fit.full { box-shadow: none; }
+html[data-theme="bauhaus"] :is(.fit.hi, .fit.mid, .fit.lo):not(.full) { clip-path: polygon(0 0, 72% 0, 100% 28%, 100% 100%, 0 100%); }
+html[data-theme="bauhaus"] .fit.big { width: 56px; height: 56px; font-size: 26px; }
+html[data-theme="bauhaus"] .fit.huge { width: 84px; height: 84px; border-radius: 0; font-size: 40px; padding-top: 16px; }
+html[data-theme="bauhaus"] .fit.huge small { font: 700 12px var(--body); opacity: 1; }
+html[data-theme="bauhaus"] .kcard .fit { width: 30px; height: 30px; font-size: 14px; }
+html[data-theme="bauhaus"] .run-results .fit { width: 28px; height: 28px; font-size: 13px; }
+
+/* tags: flat blocks, every status keeps its word on its colour */
+html[data-theme="bauhaus"] .tag { border: 0; border-radius: 0; background: var(--grey-soft); color: var(--black); font-weight: 600; font-size: 11px; line-height: 18px; padding: 0 6px; }
+html[data-theme="bauhaus"] .stage-tag { background: var(--c); color: var(--black); font-weight: 700; }
+html[data-theme="bauhaus"] .tag.ok { background: var(--green); color: var(--black); }
+html[data-theme="bauhaus"] .tag.ref { background: var(--grey); color: var(--black); }
+html[data-theme="bauhaus"] .tag.warn-tag { background: var(--grey-warm); color: var(--black); }
+html[data-theme="bauhaus"] .tag.round-tag { background: var(--r); color: var(--black); border: 0; }
+html[data-theme="bauhaus"] .tag.round-tag b { color: var(--black); font-weight: 400; }
+html[data-theme="bauhaus"] .ref-chip { border: var(--rule); border-radius: 0; background: var(--white); color: var(--black); }
+html[data-theme="bauhaus"] .star[aria-pressed="true"], html[data-theme="bauhaus"] .star:hover { color: var(--black); }
+html[data-theme="bauhaus"] .star:hover { background: var(--yellow); border-radius: 0; }
+html[data-theme="bauhaus"] .star.labeled { border: var(--rule); border-radius: 0; background: var(--white); color: var(--black); font-weight: 700; }
+html[data-theme="bauhaus"] .star.labeled[aria-pressed="true"] { background: var(--yellow); }
+html[data-theme="bauhaus"] .star.labeled .ico, html[data-theme="bauhaus"] .star.labeled[aria-pressed="true"] .ico { color: var(--black); }
+
+/* the board: tall flat fields with white cards ruled in black */
+html[data-theme="bauhaus"] .board { padding: 14px 20px; gap: 12px; }
+html[data-theme="bauhaus"] .col { flex: 1 0 180px; background: var(--c); border: 0; border-top: 0; border-radius: 0; }
+html[data-theme="bauhaus"] .col header { padding: 10px 12px 8px; align-items: baseline; gap: 10px; color: var(--black); font-weight: 700; font-size: 13px; }
+html[data-theme="bauhaus"] .col header .dot { display: none; }
+html[data-theme="bauhaus"] .col header .n { order: -1; margin-left: 0; font: 400 32px/1 var(--display); letter-spacing: -.02em; color: var(--black); }
+html[data-theme="bauhaus"] .col-cards { padding: 0 12px 12px; gap: 8px; }
+html[data-theme="bauhaus"] .col.over { background: var(--c); outline: 4px solid var(--black); outline-offset: -4px; }
+html[data-theme="bauhaus"] .col-empty { color: var(--black); font-weight: 600; text-align: left; padding: 6px 0; }
+html[data-theme="bauhaus"] .kcard { background: var(--white); border: var(--rule); border-radius: 0; padding: 10px 6px 10px 10px; }
+html[data-theme="bauhaus"] .kcard:hover { border-color: var(--black); background: var(--grey-soft); }
+html[data-theme="bauhaus"] .kcard.selected { border-color: var(--black); box-shadow: inset 8px 0 0 var(--black); padding-left: 16px; }
+html[data-theme="bauhaus"] .drawer-backdrop { background: rgba(255, 212, 0, .55); }
+html[data-theme="bauhaus"] .jobs-body.view-board .detail, html[data-theme="bauhaus"] .jobs-body.view-list .detail { box-shadow: none; }
+@media (max-width: 860px) { html[data-theme="bauhaus"] .jobs-body.view-list .detail { border-left: 0; } }
+html[data-theme="bauhaus"] .jobs-body.view-board .detail { border-left: var(--rule); }
+
+/* the detail */
+html[data-theme="bauhaus"] .detail { background: var(--white); }
+html[data-theme="bauhaus"] .empty { color: var(--black); font-weight: 500; font-size: 15px; }
+html[data-theme="bauhaus"] .dhead { background: var(--white); border-bottom: 0; padding: 18px 20px 14px; }
+html[data-theme="bauhaus"] .dhead h2 { font: 400 26px/1.1 var(--display); letter-spacing: -.02em; text-wrap: balance; }
+html[data-theme="bauhaus"] .dhead .sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+html[data-theme="bauhaus"] .dhead .bar { margin-top: 14px; }
+html[data-theme="bauhaus"] select.status-select { border: 0; border-radius: 0; padding: 7px 30px 7px 12px; font-weight: 700; font-size: 13px; color: var(--black); background-color: var(--c);
+  background-image: linear-gradient(45deg, transparent 50%, var(--black) 50%), linear-gradient(135deg, var(--black) 50%, transparent 50%);
+  background-position: right 14px top 50%, right 8px top 50%; background-size: 6px 6px; background-repeat: no-repeat; }
+html[data-theme="bauhaus"] select.status-select:focus { box-shadow: inset 0 0 0 3px var(--black); }
+html[data-theme="bauhaus"] select.status-select:hover { box-shadow: inset 0 0 0 2px var(--black); }
+html[data-theme="bauhaus"] .score { color: var(--black); }
+html[data-theme="bauhaus"] .score b { font: 400 14px var(--display); color: var(--black); }
+html[data-theme="bauhaus"] .subtabs { background: var(--white); border-bottom: var(--rule); gap: 2px; padding: 0 20px; }
+html[data-theme="bauhaus"] .subtabs button { padding: 10px 12px; color: var(--black); font-weight: 600; border-bottom: 0; }
+html[data-theme="bauhaus"] .subtabs button:hover:not(:disabled):not(.active) { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+html[data-theme="bauhaus"] .subtabs button.active { background: var(--black); color: var(--white); font-weight: 700; }
+html[data-theme="bauhaus"] .subtabs button.empty { padding: 10px 12px; opacity: .55; }
+html[data-theme="bauhaus"] .notice { background: var(--grey-soft); border: 0; border-radius: 0; padding: 18px; color: var(--black); }
+html[data-theme="bauhaus"] .notice h3 { font-size: 18px; line-height: 1.1; }
+html[data-theme="bauhaus"] .card { background: var(--white); border: 0; border-top: var(--rule); border-radius: 0; padding: 12px 0 6px; }
+html[data-theme="bauhaus"] .card h3 { font-size: 14px; }
+html[data-theme="bauhaus"] .card.is-good { border-top: 10px solid var(--green); }
+html[data-theme="bauhaus"] .card.is-warn { border-top: 10px solid var(--yellow); }
+html[data-theme="bauhaus"] .score-pane { padding: 18px 20px; }
+html[data-theme="bauhaus"] .posting-pane { border-right: var(--rule); background: var(--white); }
+html[data-theme="bauhaus"] .posting-meta { color: var(--muted); border-bottom: var(--rule); }
+html[data-theme="bauhaus"] .posting-body h4 { font-weight: 700; }
+html[data-theme="bauhaus"] .scorecard .score-head h3 { color: var(--black); font: 700 11px var(--body); text-transform: uppercase; letter-spacing: .08em; }
+html[data-theme="bauhaus"] .band { font-weight: 700; font-size: 15px; }
+html[data-theme="bauhaus"] .sources th { color: var(--black); border-bottom: var(--rule); }
+html[data-theme="bauhaus"] .sources td { border-bottom: 1px solid var(--line); font-family: var(--body); }
+html[data-theme="bauhaus"] .rate-strong { background: var(--green); color: var(--black); font-weight: 700; }
+html[data-theme="bauhaus"] .rate-partial { background: var(--yellow); color: var(--black); font-weight: 700; }
+html[data-theme="bauhaus"] .rate-missing { background: var(--red); color: var(--black); font-weight: 700; }
+html[data-theme="bauhaus"] .rows summary { color: var(--black); font-weight: 600; }
+html[data-theme="bauhaus"] .pdfpane { border-right: var(--rule); }
+html[data-theme="bauhaus"] .pdfbar { background: var(--white); border-bottom: var(--rule); font-weight: 600; }
+html[data-theme="bauhaus"] .pdfpane iframe { background: var(--grey); }
+html[data-theme="bauhaus"] .editpane { padding: 14px 20px; gap: 14px; }
+html[data-theme="bauhaus"] .metrics { color: var(--black); }
+html[data-theme="bauhaus"] .metrics b { font: 400 14px var(--display); }
+html[data-theme="bauhaus"] .pass { background: var(--green); color: var(--black); padding: 0 6px; font-weight: 700; }
+html[data-theme="bauhaus"] .fail { background: var(--red); color: var(--black); padding: 0 6px; font-weight: 700; }
+html[data-theme="bauhaus"] .diff { border: var(--rule); border-radius: 0; }
+html[data-theme="bauhaus"] .diff .ctx { color: var(--muted); }
+html[data-theme="bauhaus"] .history li { border-bottom: var(--rule); }
+html[data-theme="bauhaus"] .history li:last-child { border-bottom: 0; }
+html[data-theme="bauhaus"] .history .v { font: 400 13px var(--display); }
+html[data-theme="bauhaus"] .history .what { color: var(--muted); }
+html[data-theme="bauhaus"] .history .cur { background: var(--green); color: var(--black); padding: 0 6px; font-weight: 700; }
+html[data-theme="bauhaus"] .outside-bar { border-bottom: var(--rule); background: var(--white); }
+html[data-theme="bauhaus"] .markdown th, html[data-theme="bauhaus"] .markdown td { border: 1px solid var(--black); }
+html[data-theme="bauhaus"] .spinner { border-color: var(--grey); border-top-color: var(--black); }
+
+/* the stage path: squares on a black line; the résumé meters: flat bars with black ticks */
+html[data-theme="bauhaus"] .stage-path { margin-top: 14px; padding-top: 12px; border-top: var(--rule); gap: 8px; }
+html[data-theme="bauhaus"] .path-line { max-width: 560px; }
+html[data-theme="bauhaus"] .path-line::before { top: 11px; height: 2px; background: var(--black); border-radius: 0; }
+html[data-theme="bauhaus"] .path-line .dot { width: 24px; height: 24px; border-radius: 0; background: var(--grey); box-shadow: none; }
+html[data-theme="bauhaus"] .path-line .step.reached .dot { background: var(--black); }
+html[data-theme="bauhaus"] .path-line .step.current .dot { background: var(--c); box-shadow: inset 0 0 0 4px var(--black); }
+html[data-theme="bauhaus"] .path-line .step-name { font-size: 11px; font-weight: 700; color: #444444; }
+html[data-theme="bauhaus"] .path-line .step.current .step-name, html[data-theme="bauhaus"] .path-line .step.reached .step-name { color: var(--black); }
+html[data-theme="bauhaus"] .exits-line { color: #444444; font-weight: 700; }
+html[data-theme="bauhaus"] .xstep i { width: 16px; height: 16px; border-radius: 0; background: var(--grey-soft); box-shadow: none; }
+html[data-theme="bauhaus"] .xstep.taken { color: var(--black); }
+html[data-theme="bauhaus"] .xstep.taken i { background: var(--c); box-shadow: inset 0 0 0 3px var(--black); }
+html[data-theme="bauhaus"] .meters { gap: 10px 16px; }
+html[data-theme="bauhaus"] .meter { font-size: 13px; --c: var(--grey); }
+html[data-theme="bauhaus"] .meter.hi { --c: var(--green); } html[data-theme="bauhaus"] .meter.mid { --c: var(--yellow); } html[data-theme="bauhaus"] .meter.lo { --c: var(--red); }
+html[data-theme="bauhaus"] .meter .lbl { color: var(--black); font-weight: 600; }
+html[data-theme="bauhaus"] .meter .val { font: 400 18px/1 var(--display); color: var(--black); }
+html[data-theme="bauhaus"] .meter .val small { font: 700 11px var(--body); color: var(--black); }
+html[data-theme="bauhaus"] .meter .track { position: relative; height: 14px; border-radius: 0; background: var(--grey-soft); overflow: visible; }
+html[data-theme="bauhaus"] .meter .track i { position: relative; border-radius: 0; }
+html[data-theme="bauhaus"] .meter .track i::after { content: ""; position: absolute; right: -1px; top: -3px; bottom: -3px; width: 3px; background: var(--black); }
+html[data-theme="bauhaus"] .meter .track::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(10% - 2px), var(--black) calc(10% - 2px), var(--black) 10%);
+  background-size: 100% 4px; background-repeat: no-repeat; background-position: 0 100%; }
+
+/* the next-move buttons: flat blocks in the colour of the stage they lead to, inverting on hover */
+html[data-theme="bauhaus"] button.quick { background: var(--grey); color: var(--black); font-weight: 700; box-shadow: none; }
+html[data-theme="bauhaus"] button.quick.small { padding: 7px 12px; font-size: 12.5px; }
+html[data-theme="bauhaus"] button.quick[data-to="Applied"] { background: var(--green); }
+html[data-theme="bauhaus"] button.quick[data-to="Done"] { background: var(--blue); }
+html[data-theme="bauhaus"] button.quick[data-to="Denied"] { background: var(--grey-blue); }
+html[data-theme="bauhaus"] button.quick[data-to="In progress"] { background: var(--red); }
+html[data-theme="bauhaus"] button.quick:hover:not(:disabled) { background: var(--black); color: var(--white); box-shadow: none; }
+
+/* toasts and the moments */
+html[data-theme="bauhaus"] .toast { background: var(--black); color: var(--white); border-radius: 0; padding: 12px 16px; font-weight: 600; font-size: 14px; box-shadow: none; }
+html[data-theme="bauhaus"] .toast.error { background: var(--red); color: var(--black); }
+html[data-theme="bauhaus"] .moment-banner { background: var(--green); color: var(--black); border-radius: 0; padding: 14px 24px; font: 700 18px/1.2 var(--body); box-shadow: none; }
+html[data-theme="bauhaus"] .moment-banner.done { background: var(--blue); color: var(--black); }
+html[data-theme="bauhaus"] .cat-card { width: 420px; background: var(--blue); color: var(--black); border: 0; border-radius: 0; padding: 18px 20px; box-shadow: none; }
+html[data-theme="bauhaus"] .cat-card .cat-art { width: 150px; }
+html[data-theme="bauhaus"] .cat-card .cat-art svg { width: 150px; height: 116px; }
+html[data-theme="bauhaus"] .cat-card p { font-size: 14px; font-weight: 600; line-height: 1.35; }
+html[data-theme="bauhaus"] .cat-card b { font: 400 22px/1.1 var(--display); letter-spacing: -.01em; margin-bottom: 6px; }
+html[data-theme="bauhaus"] .cat-card button.primary { background: var(--yellow); color: var(--black); }
+html[data-theme="bauhaus"] .cat-card button.primary:hover:not(:disabled) { background: var(--black); color: var(--white); box-shadow: none; }
+html[data-theme="bauhaus"] .cat-bauhaus .tail { transform-box: fill-box; transform-origin: 0% 100%; animation: bh-swing 1.6s .4s ease-in-out 1; }
+html[data-theme="bauhaus"] .cat-bauhaus .body { transform-box: fill-box; transform-origin: 50% 100%; animation: bh-sigh 2.4s .3s ease-in-out 1; }
+@keyframes bh-swing { 30% { transform: rotate(-18deg); } 70% { transform: rotate(6deg); } }
+@keyframes bh-sigh { 40% { transform: scale(1.025, 1.035); } }
+html[data-theme="bauhaus"] .sparkle i { border-radius: 0; }
+html[data-theme="bauhaus"] .flyer { border-radius: 0; }
+/* the Applied wipe and the Done field, built by bauhaus.js */
+html[data-theme="bauhaus"] .bh-wipe { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: var(--green); z-index: 60; transform-origin: left center; pointer-events: none; }
+html[data-theme="bauhaus"] .bh-word { position: fixed; inset: 0; z-index: 61; display: grid; place-items: center; pointer-events: none; }
+html[data-theme="bauhaus"] .bh-word span { font: 400 clamp(64px, 9vw, 128px)/1 var(--display); letter-spacing: -.03em; color: var(--black); }
+html[data-theme="bauhaus"] .bh-done { position: fixed; top: 0; right: 0; bottom: 0; width: min(56vw, 760px); background: var(--blue); z-index: 60; padding: 32px; display: flex; flex-direction: column; justify-content: center; gap: 16px; pointer-events: none; overflow: hidden; }
+html[data-theme="bauhaus"] .bh-done .word { font: 400 clamp(56px, 8vw, 112px)/1 var(--display); letter-spacing: -.03em; color: var(--black); }
+html[data-theme="bauhaus"] .bh-done .msg { font-size: 20px; font-weight: 700; color: var(--black); }
+
+/* dialogs, pages, runs, documents, profile */
+html[data-theme="bauhaus"] dialog { border: var(--rule); border-radius: 0; padding: 26px 28px; box-shadow: none; }
+html[data-theme="bauhaus"] dialog::backdrop { background: rgba(255, 212, 0, .55); }
+html[data-theme="bauhaus"] dialog h2 { font-size: 28px; line-height: 1; letter-spacing: -.02em; margin-bottom: 14px; }
+html[data-theme="bauhaus"] .page h1, html[data-theme="bauhaus"] .page-head h1 { font-size: 32px; line-height: 1; letter-spacing: -.02em; margin-bottom: 6px; }
+html[data-theme="bauhaus"] .page-head { border-bottom: var(--rule); padding-bottom: 14px; }
+html[data-theme="bauhaus"] .scard { border: var(--rule); border-left-width: 2px; border-radius: 0; background: var(--white); }
+html[data-theme="bauhaus"] .scard.picked { border-left: 10px solid var(--black); }
+html[data-theme="bauhaus"] .scard .nm { font-weight: 700; }
+html[data-theme="bauhaus"] .scard .tag { background: var(--grey); }
+html[data-theme="bauhaus"] .run-bar { background: var(--white); border-top: var(--rule); }
+html[data-theme="bauhaus"] .run-bar b { font: 400 14px var(--display); }
+html[data-theme="bauhaus"] .runs { border-right: var(--rule); background: var(--white); }
+html[data-theme="bauhaus"] .runs li { border-left: 0; border-bottom: var(--rule); }
+html[data-theme="bauhaus"] .runs li.selected { background: var(--white); box-shadow: inset 10px 0 0 var(--black); }
+html[data-theme="bauhaus"] .st { display: inline-block; padding: 1px 6px; background: var(--grey); color: var(--black); }
+html[data-theme="bauhaus"] .st.running { background: var(--red); color: var(--black); }
+html[data-theme="bauhaus"] .st.done { background: var(--green); color: var(--black); }
+html[data-theme="bauhaus"] .st.failed, html[data-theme="bauhaus"] .st.stopped { background: var(--black); color: var(--white); }
+html[data-theme="bauhaus"] .st.interrupted { background: var(--grey-warm); color: var(--black); }
+html[data-theme="bauhaus"] .runlog-head { border-bottom: var(--rule); }
+html[data-theme="bauhaus"] .run-results { border-bottom: var(--rule); background: var(--white); }
+html[data-theme="bauhaus"] .run-results li { border-top: 1px solid var(--black); }
+html[data-theme="bauhaus"] .doc-head { background: var(--white); border-bottom: var(--rule); }
+html[data-theme="bauhaus"] .doc-title h1 { font-size: 24px; line-height: 1; }
+html[data-theme="bauhaus"] .doc-conflict { background: var(--red); color: var(--black); border-bottom: var(--rule); font-weight: 600; }
+html[data-theme="bauhaus"] .doc-outline { background: var(--white); border-right: var(--rule); }
+html[data-theme="bauhaus"] .doc-outline button { border-radius: 0; color: var(--muted); }
+html[data-theme="bauhaus"] .doc-outline button:hover { background: var(--yellow); color: var(--black); }
+html[data-theme="bauhaus"] .doc-outline button.l1 { color: var(--black); }
+html[data-theme="bauhaus"] .doc-text { background: var(--white); }
+html[data-theme="bauhaus"] .doc-preview { border-left: var(--rule); }
+html[data-theme="bauhaus"] .doc-preview h1 { border-top: var(--rule); }
+html[data-theme="bauhaus"] .doc-body[data-view="split"] .doc-preview { border-left: var(--rule); }
+html[data-theme="bauhaus"] .wysiwyg .ProseMirror { font: 15px/1.7 var(--body); color: var(--black); }
+html[data-theme="bauhaus"] .wysiwyg .ProseMirror :is(h1, h2) { border-bottom-color: var(--black); }
+html[data-theme="bauhaus"] .wysiwyg .ProseMirror :is(code, pre) { border-radius: 0; }
+html[data-theme="bauhaus"] .wysiwyg .ProseMirror li[data-item-type="task"]::before { border-radius: 0; border: 2px solid var(--black); }
+html[data-theme="bauhaus"] .save-state.good::before { color: var(--good); }
+html[data-theme="bauhaus"] .pcard { background: var(--white); border: 0; border-top: var(--rule); border-radius: 0; padding: 16px 0 6px; }
+html[data-theme="bauhaus"] .pcard h2 { font-size: 18px; line-height: 1.1; }
+html[data-theme="bauhaus"] details.pcard summary { font-weight: 700; }
+html[data-theme="bauhaus"] .line-preview > div { border: var(--rule); border-radius: 0; background: var(--white); }
+html[data-theme="bauhaus"] .rfile { border-top: 1px solid var(--black); }
+html[data-theme="bauhaus"] .rfile input[type=text]:disabled { background: var(--grey-soft); }
+html[data-theme="bauhaus"] .look-option { border: var(--rule); border-radius: 0; background: var(--white); padding: 12px 14px; gap: 8px; }
+html[data-theme="bauhaus"] .look-option:hover { border-color: var(--black); background: var(--grey-soft); }
+html[data-theme="bauhaus"] .look-option[aria-checked="true"] { border-color: var(--black); background: var(--yellow); box-shadow: none; }
+html[data-theme="bauhaus"] .look-swatches { display: inline-flex; align-self: flex-start; border: var(--rule); }
+html[data-theme="bauhaus"] .look-swatches i { width: 20px; height: 20px; border-radius: 0; border: 0; margin-left: 0; }
+html[data-theme="bauhaus"] .look-name { font: 400 16px/1.1 var(--display); }
+html[data-theme="bauhaus"] .look-blurb { color: var(--muted); }
+html[data-theme="bauhaus"] .round-tile { border: 0; border-radius: 0; background: var(--r); color: var(--black); font: 400 12px var(--display); }
+html[data-theme="bauhaus"] .round-tile.big { border-radius: 0; font-size: 15px; }
+html[data-theme="bauhaus"] .roles li { border-top: var(--rule); }
+html[data-theme="bauhaus"] .roles li.match .t::before { color: var(--black); }
+html[data-theme="bauhaus"] .roles details summary { color: var(--black); font-weight: 600; }
+html[data-theme="bauhaus"] .funding-note { color: var(--muted); }
+html[data-theme="bauhaus"] .startups-body .detail .pad { background: var(--white); }
+
+@media (max-width: 1100px) {
+  html[data-theme="bauhaus"] .topbar { flex-wrap: wrap; padding-top: 8px; }
+  html[data-theme="bauhaus"] .topbar .meta { margin-left: auto; }
+  html[data-theme="bauhaus"] .tabs { order: 3; flex: 1 1 100%; margin: 6px -11px 0; }
+  html[data-theme="bauhaus"] .tabs button { min-height: 40px; }
+  html[data-theme="bauhaus"] .stage .n { font-size: 48px; }
+  html[data-theme="bauhaus"] .stage[data-kind="path"] { min-width: 88px; }
+}
+@media (max-width: 760px) {
+  html[data-theme="bauhaus"] .stages { flex-wrap: wrap; height: auto; }
+  html[data-theme="bauhaus"] .stage[data-kind="path"] { flex: 1 1 40%; height: 84px; }
+  html[data-theme="bauhaus"] .stage[data-kind="side"] { flex: 1 1 28%; width: auto; height: 72px; }
+  html[data-theme="bauhaus"] .stage[data-stage="Blocked"] { margin-left: 0; }
+  html[data-theme="bauhaus"] .bh-done { width: 100%; }
+  html[data-theme="bauhaus"] .cat-card { width: calc(100vw - 32px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="bauhaus"] .cat-bauhaus .tail, html[data-theme="bauhaus"] .cat-bauhaus .body { animation: none; }
+}

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "jobspipe": {
+      "type": "http",
+      "url": "https://mcp.jobspipe.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer ${JOBSPIPE_API_KEY}"
+      }
+    }
+  }
+}

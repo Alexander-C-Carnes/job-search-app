@@ -1,0 +1,289 @@
+"""The job tracker: which jobs are being tracked and where each one stands.
+
+The source of truth is a local SQLite file (data/tracker.db), so tracking a job or changing a
+status works at once and offline. The Notion tracker is a synced copy:
+
+- A change made here (track a job, set a status, a tailoring run's scores) is saved locally and
+  queued. sync() sends the queue to Notion.
+- sync() then reads Notion's rows. Jobs added there (for example by the resume-job-fit skill)
+  appear here, and a status edited in Notion replaces the local one, unless this side has an
+  unsent change for that job, which wins.
+- A job with no URL stays local: Notion rows are matched by Job URL.
+
+When Notion can't be reached nothing is lost: the queue waits and the next sync sends it.
+"""
+from __future__ import annotations
+
+import json
+import secrets
+import sqlite3
+import threading
+import time
+from contextlib import closing
+from pathlib import Path
+from typing import Any, Optional
+
+from .notion import STATUSES, NotionTracker, TrackerEntry, merge_notes
+from .store import canonical_url, now_iso
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS tracker (
+  id TEXT PRIMARY KEY,             -- the Notion page id for rows first seen there, local-<hex> for rows tracked here
+  notion_page_id TEXT UNIQUE,      -- null until the row exists in Notion
+  page_url TEXT NOT NULL DEFAULT '',
+  job_id TEXT,                     -- the stored job this row was tracked from, if any
+  name TEXT NOT NULL DEFAULT '', company TEXT NOT NULL DEFAULT '',
+  job_url TEXT NOT NULL DEFAULT '', url_key TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT '', fit REAL, notes TEXT NOT NULL DEFAULT '',
+  priority TEXT NOT NULL DEFAULT '', due TEXT NOT NULL DEFAULT '',
+  entry TEXT,                      -- queued for Notion: the TrackerEntry to create or update there
+  dirty_status INTEGER NOT NULL DEFAULT 0,   -- queued for Notion: the status was set here
+  updated TEXT NOT NULL DEFAULT '',
+  resume_files TEXT NOT NULL DEFAULT '[]',   -- names of the files in Notion's Resume Used
+  resume_upload TEXT                         -- queued for Notion: a PDF to set as Resume Used
+);
+CREATE INDEX IF NOT EXISTS tracker_url ON tracker(url_key);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+"""
+FROM_NOTION = ("page_url", "name", "company", "job_url", "fit", "notes", "priority", "due", "resume_files")
+# Columns added after the first release, for tracker.db files made before them.
+ADDED = {"resume_files": "TEXT NOT NULL DEFAULT '[]'", "resume_upload": "TEXT"}
+
+
+class LocalTracker:
+    def __init__(self, path: Path, notion: Optional[NotionTracker] = None, seed: Optional[Path] = None):
+        self.path, self.notion = path, notion
+        self._sync_lock = threading.Lock()
+        self._cache: tuple[int, list[dict]] = (-1, [])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(self._db()) as con, con:
+            con.executescript(SCHEMA)
+            have = {r["name"] for r in con.execute("PRAGMA table_info(tracker)")}
+            for col, decl in ADDED.items():
+                if col not in have:
+                    con.execute(f"ALTER TABLE tracker ADD COLUMN {col} {decl}")
+            con.execute("PRAGMA journal_mode=WAL")
+        if seed is not None:
+            self._seed(seed)
+
+    def _db(self) -> sqlite3.Connection:
+        con = sqlite3.connect(self.path, timeout=30)
+        con.row_factory = sqlite3.Row
+        return con
+
+    def _seed(self, snapshot: Path) -> None:
+        """First run after the tracker moved here from Notion: start from the web app's last Notion snapshot."""
+        try:
+            saved = json.loads(snapshot.read_text())
+        except (OSError, ValueError):
+            return
+        with closing(self._db()) as con, con:
+            if con.execute("SELECT 1 FROM tracker LIMIT 1").fetchone():
+                return
+            for r in saved.get("rows") or []:
+                self._insert_from_notion(con, r)
+            self._bump(con)
+
+    # ---- reads ----------------------------------------------------------------
+    def _meta(self, key: str, default: Any = None) -> Any:
+        with closing(self._db()) as con:
+            row = con.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return json.loads(row["value"]) if row else default
+
+    def _set_meta(self, con: sqlite3.Connection, **values: Any) -> None:
+        con.executemany("INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        [(k, json.dumps(v)) for k, v in values.items()])
+
+    def _bump(self, con: sqlite3.Connection) -> None:
+        row = con.execute("SELECT value FROM meta WHERE key = 'version'").fetchone()
+        self._set_meta(con, version=(json.loads(row["value"]) if row else 0) + 1)
+
+    def version(self) -> int:
+        """Changes whenever a row does, in this process or another (the pipeline writes here too)."""
+        return self._meta("version", 0)
+
+    def rows(self) -> list[dict]:
+        """Every tracked job, in the shape the Notion rows had: page_id is the row's id here."""
+        version = self.version()
+        if self._cache[0] != version:
+            with closing(self._db()) as con:
+                found = con.execute("SELECT * FROM tracker ORDER BY rowid").fetchall()
+            self._cache = (version, [{
+                "page_id": r["id"], "notion_page_id": r["notion_page_id"], "page_url": r["page_url"], "job_id": r["job_id"],
+                "name": r["name"], "company": r["company"], "job_url": r["job_url"], "status": r["status"],
+                "fit": r["fit"], "notes": r["notes"], "priority": r["priority"], "due": r["due"],
+                "resume_files": json.loads(r["resume_files"] or "[]"),
+                "pending": bool(r["dirty_status"] or (r["entry"] and r["job_url"]) or r["resume_upload"])} for r in found])
+        return self._cache[1]
+
+    def state(self) -> dict:
+        """For the UI: is there a Notion copy, when it last answered, what went wrong, how much is queued."""
+        return {"notion": self.notion is not None, "synced": self._meta("synced"), "error": self._meta("error", ""),
+                "pending": sum(r["pending"] for r in self.rows()) if self.notion is not None else 0}
+
+    def known_urls(self) -> dict[str, str]:
+        """canonical Job URL -> Status for every tracked job (the pipeline skips jobs already applied to)."""
+        try:
+            self.sync()
+        except Exception:  # noqa: BLE001 - Notion down: the local rows are still the best answer
+            pass
+        return {canonical_url(r["job_url"]): r["status"] for r in self.rows() if r["job_url"]}
+
+    # ---- writes: saved here, queued for Notion -------------------------------------
+    def set_status(self, row_id: str, status: str) -> None:
+        if status not in STATUSES:
+            raise ValueError(f"status must be one of {', '.join(STATUSES)}")
+        with closing(self._db()) as con, con:
+            done = con.execute("UPDATE tracker SET status = ?, dirty_status = 1, updated = ? WHERE id = ?",
+                               (status, now_iso(), row_id))
+            if not done.rowcount:
+                raise KeyError(row_id)
+            self._bump(con)
+
+    def queue_resume(self, row_id: str, pdf: Path) -> None:
+        """Send this PDF to Notion as the row's Resume Used at the next sync (once the row is there)."""
+        with closing(self._db()) as con, con:
+            if not con.execute("UPDATE tracker SET resume_upload = ?, updated = ? WHERE id = ?",
+                               (str(pdf), now_iso(), row_id)).rowcount:
+                raise KeyError(row_id)
+            self._bump(con)
+
+    def link_job(self, row_id: str, job_id: str) -> None:
+        """Note the stored job that holds this row's posting, so the two show as one role."""
+        with closing(self._db()) as con, con:
+            if con.execute("UPDATE tracker SET job_id = ? WHERE id = ? AND job_id IS NOT ?",
+                           (job_id, row_id, job_id)).rowcount:
+                self._bump(con)
+
+    def track(self, e: TrackerEntry, job_id: Optional[str] = None) -> str:
+        """Add the job, or update its row, by the rules the Notion tracker always had: an existing row keeps
+        its status except Not started -> In progress, keeps the notes you wrote, and gets the new fit score.
+        Returns "created" or "updated"."""
+        key = canonical_url(e.url)
+        queued = json.dumps(e.__dict__) if key else None
+        with closing(self._db()) as con, con:
+            row = (con.execute("SELECT * FROM tracker WHERE job_id = ?", (job_id,)).fetchone() if job_id else None) \
+                or (con.execute("SELECT * FROM tracker WHERE url_key = ?", (key,)).fetchone() if key else None)
+            if row is None:
+                con.execute("INSERT INTO tracker(id, job_id, name, company, job_url, url_key, status, fit, notes, entry, updated) "
+                            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            ("local-" + secrets.token_hex(8), job_id, f"{e.title} — {e.company}", e.company, e.url, key,
+                             e.status, e.fit_score, e.notes, queued, now_iso()))
+                action = "created"
+            else:
+                status = "In progress" if row["status"] in ("", "Not started") and e.status == "In progress" else row["status"]
+                if row["url_key"] or key:     # Notion matches rows by Job URL, so the queued entry must carry one
+                    queued = json.dumps({**e.__dict__, "url": e.url or row["job_url"]})
+                con.execute("UPDATE tracker SET job_id = COALESCE(?, job_id), status = ?, fit = COALESCE(?, fit), notes = ?, "
+                            "job_url = CASE WHEN job_url = '' THEN ? ELSE job_url END, "
+                            "url_key = CASE WHEN url_key = '' THEN ? ELSE url_key END, entry = ?, updated = ? WHERE id = ?",
+                            (job_id, status, e.fit_score, merge_notes(row["notes"], e.notes), e.url, key,
+                             queued, now_iso(), row["id"]))
+                action = "updated"
+            self._bump(con)
+        return action
+
+    def upsert(self, e: TrackerEntry, job_id: Optional[str] = None) -> tuple[str, str]:
+        """track(), then send it to Notion now if Notion answers. Returns (action, Notion page URL or "")."""
+        action = self.track(e, job_id)
+        try:
+            self.sync()
+        except Exception:  # noqa: BLE001 - it stays queued; state()["error"] has the reason
+            pass
+        key = canonical_url(e.url)
+        return action, next((r["page_url"] for r in self.rows() if key and canonical_url(r["job_url"]) == key), "")
+
+    # ---- sync with Notion -----------------------------------------------------------
+    def sync(self) -> None:
+        """Send the queue, then read Notion's rows. Raises what Notion raises; the queue is kept."""
+        if self.notion is None:
+            return
+        with self._sync_lock:
+            try:
+                self._push()
+                self._pull()
+            except Exception as e:
+                with closing(self._db()) as con, con:
+                    self._set_meta(con, error=str(e), tried=time.time())
+                raise
+            with closing(self._db()) as con, con:
+                self._set_meta(con, error="", synced=time.time(), tried=time.time())
+
+    def _push(self) -> None:
+        with closing(self._db()) as con:
+            queued = con.execute("SELECT * FROM tracker WHERE (entry IS NOT NULL AND url_key != '') OR dirty_status = 1 "
+                                 "OR resume_upload IS NOT NULL").fetchall()
+        for row in queued:
+            page_id = row["notion_page_id"]
+            if row["entry"] and row["url_key"]:
+                # upsert finds the row by Job URL first, so a retry after a half-finished attempt can't add a duplicate
+                _, page = self.notion.upsert_page(TrackerEntry(**json.loads(row["entry"])))
+                page_id = page["id"]
+                with closing(self._db()) as con, con:
+                    # another local row may already hold this page (the same job tracked twice): keep this one
+                    con.execute("DELETE FROM tracker WHERE notion_page_id = ? AND id != ?", (page_id, row["id"]))
+                    con.execute("UPDATE tracker SET notion_page_id = ?, page_url = ? WHERE id = ?",
+                                (page_id, page.get("url", ""), row["id"]))
+                    # leave the queue alone if something newer was queued while this was being sent
+                    con.execute("UPDATE tracker SET entry = NULL WHERE id = ? AND entry = ?", (row["id"], row["entry"]))
+                    self._bump(con)
+            if row["dirty_status"] and page_id:
+                self.notion.set_status(page_id, row["status"])
+                with closing(self._db()) as con, con:
+                    con.execute("UPDATE tracker SET dirty_status = 0 WHERE id = ? AND status = ?", (row["id"], row["status"]))
+                    self._bump(con)
+            if row["resume_upload"] and page_id:
+                # A file already in Notion's Resume Used was put there by hand: it is kept, not replaced.
+                pdf = Path(row["resume_upload"])
+                if pdf.exists() and not self.notion.resume_files(page_id):
+                    self.notion.attach_resume(page_id, pdf.name, pdf.read_bytes())
+                with closing(self._db()) as con, con:
+                    con.execute("UPDATE tracker SET resume_upload = NULL WHERE id = ? AND resume_upload = ?",
+                                (row["id"], row["resume_upload"]))
+                    self._bump(con)
+
+    def _insert_from_notion(self, con: sqlite3.Connection, r: dict) -> None:
+        con.execute("INSERT INTO tracker(id, notion_page_id, page_url, name, company, job_url, url_key, status, fit, notes, "
+                    "priority, due, resume_files, updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (r["page_id"], r["page_id"], r.get("page_url", ""), r.get("name", ""), r.get("company", ""),
+                     r.get("job_url", ""), canonical_url(r.get("job_url")), r.get("status", ""), r.get("fit"),
+                     r.get("notes", ""), r.get("priority", ""), r.get("due", ""),
+                     _file_names(r.get("resume_files")), now_iso()))
+
+    def _pull(self) -> None:
+        theirs = self.notion.list_jobs()
+        with closing(self._db()) as con, con:
+            before = [tuple(r) for r in con.execute("SELECT * FROM tracker ORDER BY id")]
+            for r in theirs:
+                key = canonical_url(r["job_url"])
+                row = con.execute("SELECT * FROM tracker WHERE notion_page_id = ? OR id = ?", (r["page_id"],) * 2).fetchone() \
+                    or (con.execute("SELECT * FROM tracker WHERE url_key = ? AND notion_page_id IS NULL", (key,)).fetchone()
+                        if key else None)
+                if row is None:
+                    self._insert_from_notion(con, r)
+                    continue
+                values = {k: r.get(k, "") if k != "fit" else r.get("fit") for k in FROM_NOTION}
+                values["resume_files"] = _file_names(r.get("resume_files"))
+                if not row["dirty_status"]:       # an unsent status set here wins over Notion's
+                    values["status"] = r["status"]
+                for k in ("name", "company", "job_url"):     # an empty field in Notion doesn't blank what's known here
+                    if not values[k]:
+                        del values[k]
+                if key:
+                    values["url_key"] = key
+                con.execute(f"UPDATE tracker SET notion_page_id = ?, {', '.join(k + ' = ?' for k in values)} WHERE id = ?",
+                            (r["page_id"], *values.values(), row["id"]))
+            # A row that was in Notion and is gone from it was deleted there, unless it still has something to send.
+            # An entirely empty answer is not trusted to mean "everything was deleted".
+            ids = [r["page_id"] for r in theirs]
+            if ids:
+                con.execute(
+                    f"DELETE FROM tracker WHERE notion_page_id IS NOT NULL AND dirty_status = 0 AND entry IS NULL "
+                    f"AND notion_page_id NOT IN ({','.join('?' * len(ids))})", ids)
+            if before != [tuple(r) for r in con.execute("SELECT * FROM tracker ORDER BY id")]:
+                self._bump(con)
+
+
+def _file_names(files: Optional[list]) -> str:
+    """Notion's file links expire within the hour, so only the names are kept; downloads ask Notion afresh."""
+    return json.dumps([f["name"] if isinstance(f, dict) else str(f) for f in files or []])
