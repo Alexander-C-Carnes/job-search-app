@@ -1503,7 +1503,7 @@ function fullBlock(j, d) {
   const row = ([src, n]) => {
     const b = f.baseline[src] || {};
     return h("tr", { class: src === f.recommended_base ? "rec" : "" },
-      h("td", {}, src, src === f.recommended_base ? h("span", { class: "tag" }, "best base") : null),
+      h("td", {}, src, src === f.recommended_base ? h("span", { class: "tag" }, "best résumé") : null),
       h("td", {}, n ?? "–"), h("td", {}, pct(b.skills)), h("td", {}, pct(b.experience)), h("td", {}, b.total == null ? "–" : pct(b.total)));
   };
   return h("div", { class: "card full-score" },
@@ -1543,7 +1543,7 @@ function signalBlock(j, d) {
         h("h3", {}, "Signal score"),
         h("div", { class: "band" }, BANDS.find(([min]) => t.fit_score >= min)[1]),
         h("p", {}, t.one_line),
-        h("p", { class: "muted" }, t.band_reason, " Level: ", t.level_match, ". Suggested base résumé: ", t.recommended_base, "."))),
+        h("p", { class: "muted" }, t.band_reason, " Level: ", t.level_match, ". Best existing résumé: ", t.recommended_base, "."))),
     t.coverage_pct != null && t.requirements?.length ? h("details", { class: "rows" },
       h("summary", {}, `Covers ${Math.round(t.coverage_pct)}% of what the posting asks, weighted (${plural(t.requirements.length, "requirement")})`),
       h("table", { class: "sources" }, h("tbody", {}, ...t.requirements.map((r) => h("tr", {},

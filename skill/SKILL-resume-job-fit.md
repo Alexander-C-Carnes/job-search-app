@@ -105,7 +105,7 @@ Orchestrator check: every "Use" keyword and every CORE SKILLS item points to led
 
 ## Stage 3: Writer/reviewer agents A, B, C (parallel)
 
-Launch three copies of 05 Resume writer, lens A (posting language), B (evidence fidelity), and C (recruiter scorecard). Each reads `jd.md`, `04-match.md`, the impact record, the recommended base resume, and `references/resume-rules.md`, reviews the brief against the posting and evidence, and writes `resume-draft-X.md` plus `trace-X.md`.
+Launch three copies of 05 Resume writer, lens A (posting language), B (evidence fidelity), and C (recruiter scorecard). Each reads `jd.md`, `04-match.md`, the impact record, the best existing resume (for the frame only: contact line, job lines, education, interests), and `references/resume-rules.md`, reviews the brief against the posting and evidence, builds every bullet fresh from the evidence ledger rather than editing an existing resume, and writes `resume-draft-X.md` plus `trace-X.md`.
 
 Orchestrator check, per draft:
 - `python <skill>/scripts/check_resume.py resume-draft-X.md --title "<exact posting title>" --trace trace-X.md`

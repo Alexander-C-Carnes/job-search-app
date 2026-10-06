@@ -60,11 +60,11 @@ Evidence-backed only, posting's wording, ordered by weight then posting order.
 ## Scores
 1–10 per source with one-line reason (rubric in scoring-and-report.md). Rewrite opportunity if impact score beats the best resume by 1+.
 
-## Recommended base resume
-The best-scoring variant, which the writers start from, and why.
+## Best existing resume
+The best-scoring variant and why. The writers take only the frame from it (contact line, which employers appear, job lines, education, interests); every bullet is written fresh from the ledger, so make the ledger cover each High- and Med-weight requirement from the strongest source, the impact record first.
 
 ## Positioning
-Headline candidate (starting with the posting's exact title, level included; that's the target role, so don't list it under Do not claim), which work to lead with, what to cut or shrink.
+Headline candidate (starting with the posting's exact title, level included; that's the target role, so don't list it under Do not claim), which work to lead with, what to leave out.
 
 ## Unconfirmed gaps
 Requirements missing or partial in ALL sources — unconfirmed, not facts — each with a specific question in the posting's wording.
@@ -76,4 +76,4 @@ For each High-weight requirement he meets: the one STAR story (ledger IDs).
 ### `ratings.json` and `keywords.json`
 In the shapes in scoring-and-report.md: ratings for every source (impact record first), 30–50 ATS keywords as case-insensitive regexes merged from 02 and 03's keyword lists.
 
-Return a one-paragraph summary to the orchestrator: scores, recommended base, number of unconfirmed gaps.
+Return a one-paragraph summary to the orchestrator: scores, best existing resume, number of unconfirmed gaps.

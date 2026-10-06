@@ -53,7 +53,7 @@ Adapted from Jobscan's guides on resume headlines and on how to write a resume (
 
 ## Mirroring the posting's language
 
-Apply this to every draft bullet in the report and to any tailored resume {first} asks for ("make the updates", "rewrite my resume for this"). Write a tailored resume as a file in the same format as the resume it starts from (usually Markdown), starting from the best-scoring variant.
+Apply this to every draft bullet in the report and to any tailored resume {first} asks for ("make the updates", "rewrite my resume for this"). Write a tailored resume as a Markdown file built from the impact record through the evidence ledger: every bullet, the headline, the summary and CORE SKILLS are written fresh for the posting. Take only the frame (contact line, which employers appear, job lines, education, interests) from the best-scoring variant; never start from its bullets or their order.
 
 - **Reuse verbatim where true.** Prefer the posting's exact phrase over a synonym. If the posting says "escalation management", write "escalation management", not "incident handling". If it says "XFN collaboration" or "player-coach", use those words. Keep the posting's capitalization and hyphenation for tool names and terms.
 - **Merge, don't paste.** Each bullet leads with the posting's phrase, then proves it with {first}'s real evidence and figures. For example: "Defined and tracked release-quality metrics: a weekly dashboard of failed deploys, rollbacks, and time to restore…". Never paste posting sentences in as standalone claims.

@@ -290,7 +290,7 @@ class Analysis:
     match_md: str
     ratings: dict
     keywords: dict
-    base: str                       # recommended base resume (a candidate.resumes source name)
+    base: str                       # best existing resume (a candidate.resumes source name); the writers' frame
     baseline: dict[str, dict]       # scorecard per source, before any tailoring
     warnings: list[str] = field(default_factory=list)
 
@@ -500,7 +500,7 @@ class Tailor:
                 "\"scores\" gives one 1-10 score per source in the same order.\n"
                 "- keywords.json is one flat JSON object, {\"Keyword label\": \"case-insensitive regex\", ...}, "
                 "with no wrapper key.\n"
-                "- Also write `recommended-base.txt` containing only the source name of the recommended base resume.")
+                "- Also write `recommended-base.txt` containing only the source name of the best existing resume.")
         s2 = await self._checked(
             AgentCall(label="04-matcher", model=A, instructions=brief("04-matcher.md") + note, documents=docs2,
                       expect=["04-match.md", "ratings.json", "keywords.json", "recommended-base.txt"],
@@ -538,8 +538,8 @@ class Tailor:
         # Stage 3 ------------------------------------------------------------
         self.log("  Stage 3: writers A, B, C")
         wdocs = {"jd.md": jd_md, "04-match.md": match_md}
-        wnote = (f"\n\nOrchestrator notes:\n- Recommended base resume: {base} "
-                 f"(<skill>/references/{config.candidate().resumes[base]}).\n"
+        wnote = (f"\n\nOrchestrator notes:\n- Best existing resume, for the frame only: {base} "
+                 f"(<skill>/references/{config.candidate().resumes[base]}). Build every bullet from the ledger.\n"
                  f"- The posting's exact job title: {title}")
         writers = await asyncio.gather(*(
             self.runner.run(AgentCall(

@@ -1,17 +1,24 @@
 # Agent 05 — Resume writer/reviewer (runs three times: A, B, C)
 
-Three copies of you run in parallel, each with a different lens. You do not see each other's drafts. Each of you reviews the match brief against the job description, checks the language and the evidence, and writes a complete tailored resume.
+Three copies of you run in parallel, each with a different lens. You do not see each other's drafts. Each of you reviews the match brief against the job description, checks the language and the evidence, and builds a complete tailored resume from the evidence ledger: every bullet is new, written for this posting.
 
 ## Inputs
 - `jd.md` — the posting, verbatim
 - `04-match.md` — requirement map, evidence ledger, keywords, ranked CORE SKILLS, positioning, do-not-claim list
 - `<skill>/references/impact-record.md` — to verify every ledger item you use says what 04 says it does
-- The recommended base resume named in `04-match.md` (`<skill>/references/resume-*.md`)
+- The best existing resume the orchestrator names: the frame only (see "Build from the evidence, not a resume")
 - `<skill>/references/resume-rules.md` — read in full; every rule applies
 - Your lens letter (A, B, or C) from the orchestrator
 
 ## Review first
 Before writing, check `04-match.md` against the posting and the impact record. Note in your trace file any ledger item that overstates its source, any posting phrase on the Use list that the evidence doesn't truly support, and any must-have the brief missed. Fix these in your draft (drop or rescope); don't silently carry them.
+
+## Build from the evidence, not a resume
+Never start from an existing resume's bullets, wording, or bullet order, even the best-scoring one. Existing resumes were written for other postings; editing one anchors the draft on what that posting needed.
+- **Frame only.** The best existing resume supplies the name and contact line, which employers appear under PROFESSIONAL EXPERIENCE and ADDITIONAL EXPERIENCE, each job line (employer, title, dates, location), EDUCATION, and INTERESTS. Nothing else comes from it.
+- **Plan from the requirements.** For each role, list the requirements in `04-match.md`'s requirement map whose best evidence comes from that role, by weight. Write one bullet per requirement from its ledger items, leading with the posting's phrase. A role's bullets follow the posting's priorities, not the order any resume used.
+- **The impact record first.** Draw on the ledger items from the impact record before any from a resume. A resume variant is evidence only for what the impact record doesn't cover (for example earlier roles), and only through ledger items. Where a variant is the only source, the facts and figures match it but the bullet is written fresh, leading with this posting's language.
+- Headline, summary, ADDITIONAL EXPERIENCE paragraphs, and CORE SKILLS are written fresh the same way.
 
 ## Your lens
 All three lenses follow every rule. The lens decides what wins when rules leave a choice.
@@ -59,7 +66,7 @@ Soft Skills: [a] | [b] | ...
 [one line per credential]
 
 ## INTERESTS
-[pipe-separated, taken from the base resume if it has them]
+[pipe-separated, taken from the frame resume if it has them]
 ```
 
 ## Write `trace-[A|B|C].md`
