@@ -9,6 +9,8 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import DoubleQuotedScalarString
 
+from .. import config
+
 FIELDS = ("id", "name", "titles", "exclude_titles", "country", "posted_within_days", "min_salary_usd",
           "remote", "work_arrangement", "locations", "seniority", "limit", "api_filters")
 LIST_FIELDS = {"titles", "exclude_titles", "work_arrangement", "locations", "seniority"}
@@ -204,7 +206,7 @@ def save_candidate(path: Path, cand: dict) -> None:
 
 
 # ---- the AI (searches.yaml's `models:` section and the key in the profile's .env, edited on the Profile tab) ----
-MODEL_STAGES = ("triage", "analysis", "writer")
+MODEL_STAGES = ("triage", "analysis", "writer", "rescore")
 EFFORT_CHOICES = ("low", "medium", "high")
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,119}")
 
@@ -213,7 +215,10 @@ def load_models(path: Path) -> dict:
     m = _yaml().load(path.read_text()).get("models") or {}
     stages = {s: {"model": str((m.get(s) or {}).get("model") or ""), "effort": str((m.get(s) or {}).get("effort") or "")}
               for s in MODEL_STAGES}
-    return {"backend": str(m.get("backend") or "claude-code"), "base_url": str(m.get("base_url") or ""), "stages": stages}
+    backend = str(m.get("backend") or "claude-code")
+    if not m.get("rescore"):            # a profile from before live scores
+        stages["rescore"] = config.rescore_default(backend, stages["triage"])
+    return {"backend": backend, "base_url": str(m.get("base_url") or ""), "stages": stages}
 
 
 def save_models(path: Path, backend: str, base_url: str, stages: dict) -> None:
@@ -252,6 +257,8 @@ def clean_models(raw: dict, backends) -> tuple[str, str, dict]:
     stages = {}
     for s in MODEL_STAGES:
         r = (raw.get("stages") or {}).get(s) or {}
+        if s == "rescore" and not r:    # a page from before live scores
+            r = config.rescore_default(backend, stages["triage"])
         model, effort = str(r.get("model") or "").strip(), str(r.get("effort") or "medium")
         if not MODEL_ID.fullmatch(model):
             raise SearchError(f"Choose a model for {s}.")

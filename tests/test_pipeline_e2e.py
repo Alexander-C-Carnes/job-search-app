@@ -51,7 +51,7 @@ def test_full_run(tmp_dirs):
     stages = [l for l in labels if not l.startswith("triage:")]
     assert stages[:3] == ["01-objectives", "02-skills", "03-experience"]
     assert stages[3:] == ["04-matcher", "05-writer-A", "05-writer-B", "05-writer-C", "rate-drafts",
-                          "merge", "rate-final", "report"]
+                          "merge", "rate-final-1", "rate-final-2", "rate-final-3", "report"]
     # stage 1 agents never see the candidate materials; writers share a cached prefix with a lens tail
     assert all(not c.candidate for c in runner.calls if c.label in ("01-objectives", "02-skills", "03-experience"))
     assert all(c.tail.startswith("Your lens:") for c in runner.calls if c.label.startswith("05-writer"))
@@ -129,9 +129,31 @@ def test_resume_over_two_pages_is_trimmed(tmp_dirs, monkeypatch):
     p, runner, _ = build(tmp_dirs, {"Technical Program Manager": [make_job("best")]}, {"best": 9})
     c = asyncio.run(p.tailor_job(make_job("best")))
     labels = [x.label for x in runner.calls]
-    assert labels[labels.index("merge"):] == ["merge", "rate-final", "trim", "rate-final", "report"]
+    rate = ["rate-final-1", "rate-final-2", "rate-final-3"]
+    assert labels[labels.index("merge"):] == ["merge", *rate, "trim", *rate, "report"]
     trim = next(x for x in runner.calls if x.label == "trim")
     assert "renders to 3 pages" in trim.instructions and "deleting only" in trim.instructions
     assert c.tailored.pages == 2 and not any("page" in w for w in c.tailored.warnings)
     merge = next(x for x in runner.calls if x.label == "merge")
     assert "Hard length limit" in merge.instructions
+
+
+def test_final_rating_is_the_synthesis_of_three():
+    from jobpipe.tailor import synthesize_ratings
+    def run(ratings, score):
+        return {"sources": ["Base", "Tailored resume"], "scores": [6, score],
+                "skills": [{"requirement": f"r{i}", "weight": "High", "ratings": ["missing", x], "notes": ["", f"{x} {score}"]}
+                           for i, x in enumerate(ratings)], "experience": []}
+    runs = [run(["strong", "strong", "strong", "partial"], 8),
+            run(["strong", "partial", "missing", "partial"], 9),
+            run(["partial", "partial", "partial", "missing"], 7)]
+    out = synthesize_ratings(runs, "Tailored resume")
+    # majority per row; all three different -> partial; the median score
+    assert [r["ratings"][1] for r in out["skills"]] == ["strong", "partial", "partial", "partial"]
+    assert out["scores"] == [6, 8.0] and out["skills"][0]["ratings"][0] == "missing"      # other sources kept
+    assert out["skills"][1]["notes"][1] in ("partial 9", "partial 7")                    # a note that matches
+    assert out["runs"] == {"source": "Tailored resume", "scores": [8.0, 9.0, 7.0], "rows_agreeing": 0, "rows": 4}
+    # with two runs left, the lower of each
+    two = synthesize_ratings(runs[:2], "Tailored resume")
+    assert [r["ratings"][1] for r in two["skills"]] == ["strong", "partial", "missing", "partial"]
+    assert two["scores"][1] == 8.0

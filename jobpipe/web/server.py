@@ -772,10 +772,26 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         try:
             base = int(body.get("base", 0))
             if isinstance(body.get("markdown"), str):
-                return ws.save_text(base, body["markdown"])
-            return ws.save_page_edits(base, list(body.get("edits") or []))
+                h = ws.save_text(base, body["markdown"])
+            else:
+                h = ws.save_page_edits(base, list(body.get("edits") or []))
         except (EditError, ValueError, TypeError) as e:
             raise HTTPException(400, str(e)) from None
+        keep_scores(jid, ws)          # the new keyword share now; POST .../rescore re-rates the rest
+        return h
+
+    @app.post("/api/jobs/{jid}/resume/rescore")
+    async def rescore_resume(jid: str, body: dict):
+        """Re-rate a hand-edited version ({"n": n}); waits for a chat reply in progress first."""
+        ws = workspace(jid)
+        lock = state["edit_locks"].setdefault(jid, asyncio.Lock())
+        async with lock:
+            try:
+                v = await ws.rescore(int(body.get("n", 0)), get_runner(), cfg)
+            except (EditError, ValueError) as e:
+                raise HTTPException(400, str(e)) from None
+        keep_scores(jid, ws)
+        return {"version": v}
 
     # ---- chat and edits --------------------------------------------------------------------
     # POST /edit sends one chat message; Claude replies, and proposes an edit only when asked for one.
@@ -817,12 +833,20 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             raise HTTPException(409, "Claude is still answering; wait for the reply.")
         return {"chat": workspace(jid).clear_chat()}
 
+    def keep_scores(jid: str, ws: ResumeWorkspace) -> None:
+        """The current version's ATS total and résumé score become the job's (a tailored job only)."""
+        if local_path((board.state().get(jid) or {}).get("run_dir")) and (sc := ws.current_scores()):
+            store.update(jid, **sc)
+
     @app.post("/api/jobs/{jid}/edit/accept")
     def accept(jid: str):
+        ws = workspace(jid)
         try:
-            return workspace(jid).accept()
+            h = ws.accept()
         except EditError as e:
             raise HTTPException(400, str(e)) from None
+        keep_scores(jid, ws)
+        return h
 
     @app.post("/api/jobs/{jid}/edit/discard")
     def discard(jid: str):
@@ -830,10 +854,13 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
 
     @app.post("/api/jobs/{jid}/restore")
     def restore(jid: str, body: dict):
+        ws = workspace(jid)
         try:
-            return workspace(jid).restore(int(body.get("n", 0)))
+            h = ws.restore(int(body.get("n", 0)))
         except (EditError, ValueError) as e:
             raise HTTPException(400, str(e)) from None
+        keep_scores(jid, ws)
+        return h
 
     # ---- searches --------------------------------------------------------------------------
     @app.get("/api/searches")
@@ -1202,7 +1229,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         except searches_file.SearchError as e:
             raise HTTPException(400, str(e)) from None
         cfg.backend, cfg.base_url = backend, base_url or None
-        cfg.triage_model, cfg.analysis_model, cfg.writer_model = (
+        cfg.triage_model, cfg.analysis_model, cfg.writer_model, cfg.rescore_model = (
             ModelCfg(**stages[s]) for s in searches_file.MODEL_STAGES)
         state["runner"] = None
         return get_ai()

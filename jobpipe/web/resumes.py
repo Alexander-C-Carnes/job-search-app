@@ -10,12 +10,17 @@ Layout inside the job's run folder:
 Each message to Claude carries the conversation so far. Claude always replies, and writes a revised
 résumé only when the candidate asks for a change, so questions and discussion cost no edit.
 Claude edits the markdown, never the PDF. Every proposal is re-rendered, run through
-check_resume.py and scored for posting keywords before the candidate sees it, and nothing
-replaces the current version until they accept it.
+check_resume.py and scored before the candidate sees it, and nothing replaces the current version
+until they accept it.
 
 The candidate can also edit by hand: on the page (the résumé drawn in the PDF's layout, each line
 click-to-edit; apply_page_edits maps the changed text back onto its markdown lines) or as the
 markdown itself. A hand edit is saved straight away as a new version, re-rendered and checked.
+
+Scores: each version carries its ATS total (skills / experience / keywords, the tailoring run's math) and
+résumé score. An edit, Claude's or a hand edit, is re-rated against the requirement rows in
+ratings-final.json, alongside the render, so the scores move with every edit; accepting or restoring a
+version makes its scores the job's.
 """
 from __future__ import annotations
 
@@ -32,7 +37,7 @@ from typing import Optional
 from .. import config, render
 from ..config import Config
 from ..llm import AgentCall, Runner, brief
-from ..tailor import exact_title, normalize_keywords, run_script
+from ..tailor import VALUE, exact_title, normalize_keywords, run_script, scorecard
 
 EDIT_BRIEF = """# Resume chat
 
@@ -52,6 +57,19 @@ Rules for everything you change on your own (his instruction overrides them):
 5. Change only what he asks for. Keep the posting's own wording where the evidence supports it.
 """
 CHAT_TURNS = 24     # earlier messages sent with each new one
+TAILORED = "Tailored resume"    # the tailored résumé's source name in ratings-final.json
+
+RERATE_BRIEF = """# Re-rate the edited resume
+
+{name} just changed his tailored resume in a chat. Rate the revised resume (resume-edited.md) against the posting's requirements the way the tailoring run rated it, so his ATS scorecard and resume score stay current.
+
+requirements.json lists every skills and experience row with its weight and the rating the previous version got, plus that version's 1-10 score. For each row, rate the revised resume literally on what it says: a resume only gets credit for what is on the page, because recruiters don't infer. strong = clearly demonstrated with scope or results; partial = adjacent or transferable; missing = not on the page. Keep the previous rating wherever the change (changes.md) doesn't touch what the page shows for that row, so a score moves only because the resume did. Then score the revised resume 1-10 with the rubric in scoring-and-report.md.
+
+Write `ratings.json`: {{"skills": ["strong"|"partial"|"missing", ...], "experience": [...], "score": n}}, one rating per row, in the order of requirements.json.
+"""
+
+
+SCORE_KEYS = ("ats", "ats_parts", "resume_score", "ratings", "rerated", "rating")
 
 
 class EditError(RuntimeError):
@@ -95,9 +113,14 @@ class ResumeWorkspace:
         else:
             render.render_pdf(src.read_text(), self.vdir / "v1.pdf")
         check = self.check(self.vdir / "v1.md")
+        md = (self.vdir / "v1.md").read_text()
+        pdf_txt = self.run_dir / "resume-final.pdf.txt"     # the text the tailoring run's ATS total was measured on
+        rows = self.requirements()
         self._save({"current": 1, "proposal": None, "versions": [{
             "n": 1, "created": _now(), "source": "pipeline", "instruction": "", "changes": "",
-            "keywords_pct": self.keyword_pct((self.vdir / "v1.md").read_text()), "check": check}]})
+            "keywords_pct": self.keyword_pct(md), "check": check,
+            **(self.scores(rows["ratings"], rows["score"], pdf_txt.read_text() if pdf_txt.exists() else md)
+               if rows else {})}]})
 
     def md(self, n: Optional[int] = None) -> str:
         n = n or self.history()["current"]
@@ -140,6 +163,75 @@ class ResumeWorkspace:
         kw = normalize_keywords(json.loads(kw_path.read_text()))[0]
         hits = sum(bool(re.search(p, text, re.I)) for p in kw.values())
         return round(100 * hits / max(1, len(kw)), 1)
+
+    def requirements(self) -> Optional[dict]:
+        """The requirement rows the tailoring run rated (ratings-final.json) with the tailored résumé's
+        ratings and score: {"skills": [rows], "experience": [rows], "ratings": {...}, "score": n}."""
+        try:
+            d = json.loads((self.run_dir / "ratings-final.json").read_text())
+            i = d["sources"].index(TAILORED)
+            rows = {sec: [{"requirement": r.get("requirement", ""), "weight": r["weight"]} for r in d.get(sec) or []]
+                    for sec in ("skills", "experience")}
+            ratings = {sec: [r["ratings"][i].lower() for r in d.get(sec) or []] for sec in rows}
+            return {**rows, "ratings": ratings, "score": (d.get("scores") or [None] * (i + 1))[i]}
+        except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
+            return None
+
+    def scores(self, ratings: dict, score: Optional[float], text: str, rerated: bool = True) -> dict:
+        """A version's scores: the ATS total and its parts (keywords measured on `text`), the résumé score,
+        and the ratings they came from. rerated=False: the ratings were carried over, not re-rated."""
+        rows, kw_path = self.requirements(), self.run_dir / "keywords.json"
+        if not rows or not kw_path.exists():
+            return {}
+        keywords = normalize_keywords(json.loads(kw_path.read_text()))[0]
+        table = {"sources": [TAILORED], **{sec: [{**r, "ratings": [x]} for r, x in zip(rows[sec], ratings[sec])]
+                                           for sec in ("skills", "experience")}}
+        card = scorecard(table, keywords, {TAILORED: text})[TAILORED]
+        r1 = lambda v: None if v is None else round(v, 1)
+        return {"ats": r1(card["total"]), "ats_parts": {k: r1(card[k]) for k in ("skills", "experience", "keywords")},
+                "resume_score": score, "ratings": ratings, "rerated": rerated}
+
+    async def rerate(self, new_md: str, old_md: str, prior: dict, runner: Runner, cfg: Config) -> Optional[dict]:
+        """Rate the revised résumé on every requirement row. None when there are no rows or the rating failed."""
+        rows = self.requirements()
+        if not rows:
+            return None
+        reqs = {sec: [{**r, "previous": x} for r, x in zip(rows[sec], prior["ratings"][sec])]
+                for sec in ("skills", "experience")}
+        changed = "\n".join(("- " + o["old"] if o["op"] == "del" else "+ " + o["new"] if o["op"] == "add"
+                              else f"- {o['old']}\n+ {o['new']}") for o in diff(old_md, new_md) if o["op"] != "same")
+        # A small model and none of the candidate materials: the rows, the page and the rubric are all it rates on.
+        cand = config.candidate()
+        call = AgentCall(label="resume-rerate", model=cfg.rescore_model, candidate=False,
+                         instructions=cand.personalize(RERATE_BRIEF),
+                         documents={"jd.md": (self.run_dir / "jd.md").read_text(),
+                                    "scoring-and-report.md": cand.personalize(
+                                        (config.SKILL / "references" / "scoring-and-report.md").read_text()),
+                                    "requirements.json": json.dumps({**reqs, "previous_score": prior.get("score")},
+                                                                    indent=2),
+                                    "changes.md": changed or "(no line changed)", "resume-edited.md": new_md},
+                         expect=["ratings.json"])
+        try:
+            d = json.loads((await runner.run(call)).files["ratings.json"])
+            out = {sec: [str(x).lower() for x in d[sec]] for sec in ("skills", "experience")}
+            if any(len(out[sec]) != len(rows[sec]) or any(x not in VALUE for x in out[sec]) for sec in out):
+                return None
+            score = d.get("score")
+            return {"ratings": out, "score": float(score) if isinstance(score, (int, float)) else prior.get("score")}
+        except Exception:  # noqa: BLE001 - a failed rating keeps the edit; its scores carry over the old ratings
+            return None
+
+    def prior(self, h: dict, base: Optional[int] = None) -> Optional[dict]:
+        """The ratings a new edit is rated against: the pending proposal's (unless the edit is built on
+        version `base`), else that version's (the current one by default), else the tailoring run's."""
+        rows = self.requirements()
+        if not rows:
+            return None
+        cur = next((v for v in h["versions"] if v["n"] == (base or h["current"])), {})
+        for v in ((h.get("proposal") or {}) if base is None else {}, cur):
+            if v.get("ratings"):
+                return {"ratings": v["ratings"], "score": v.get("resume_score")}
+        return {"ratings": rows["ratings"], "score": rows["score"]}
 
     def check(self, md_path: Path) -> dict:
         title = self.title()
@@ -190,10 +282,20 @@ class ResumeWorkspace:
             return {"reply": reply, "proposal": None}
         prop_md = self.vdir / "proposal.md"
         prop_md.write_text(new_md)
-        pages, _ = await asyncio.to_thread(render.render_pdf, new_md, self.vdir / "proposal.pdf")
+        prior = self.prior(h)
+
+        async def rate() -> Optional[dict]:
+            return await self.rerate(new_md, pending or current, prior, runner, cfg) if prior else None
+        (pages, pdf_text), check, rated = await asyncio.gather(
+            asyncio.to_thread(render.render_pdf, new_md, self.vdir / "proposal.pdf"),
+            asyncio.to_thread(self.check, prop_md), rate())
+        scores = {}
+        if prior:
+            r = rated or prior
+            scores = self.scores(r["ratings"], r["score"], pdf_text or new_md, rerated=rated is not None)
         proposal = {"created": _now(), "instruction": instruction, "changes": reply,
-                    "pages": pages, "check": await asyncio.to_thread(self.check, prop_md),
-                    "keywords_pct": self.keyword_pct(new_md), "base": h["current"]}
+                    "pages": pages, "check": check,
+                    "keywords_pct": self.keyword_pct(new_md), "base": h["current"], **scores}
         h["proposal"] = proposal
         self._save(h)
         self._say("claude", reply, proposal=True)
@@ -210,12 +312,19 @@ class ResumeWorkspace:
         (self.vdir / "proposal.md").rename(self.vdir / f"v{n}.md")
         (self.vdir / "proposal.pdf").rename(self.vdir / f"v{n}.pdf")
         h["versions"].append({"n": n, "created": _now(), "source": "edit", "instruction": p["instruction"],
-                              "changes": p["changes"], "keywords_pct": p["keywords_pct"], "check": p["check"]})
+                              "changes": p["changes"], "keywords_pct": p["keywords_pct"], "check": p["check"],
+                              **{k: p[k] for k in SCORE_KEYS if k in p}})
         h["current"], h["proposal"] = n, None
         self._save(h)
         self._export(n)
         self._say("note", f"Accepted the proposed edit as v{n}.")
         return h
+
+    def current_scores(self) -> dict:
+        """The current version's ATS total and résumé score, for the job's row ({} when it has none)."""
+        h = self.history()
+        v = next((v for v in h["versions"] if v["n"] == h["current"]), {})
+        return {"ats_total": v["ats"], "resume_score": v.get("resume_score")} if v.get("ats") is not None else {}
 
     def discard(self) -> dict:
         h = self.history()
@@ -272,18 +381,42 @@ class ResumeWorkspace:
         n = max(v["n"] for v in h["versions"]) + 1
         md = md.rstrip("\n") + "\n"
         (self.vdir / f"v{n}.md").write_text(md)
-        pages, _ = render.render_pdf(md, self.vdir / f"v{n}.pdf")
+        pages, pdf_text = render.render_pdf(md, self.vdir / f"v{n}.pdf")
+        (self.vdir / f"v{n}.pdf.txt").write_text(pdf_text or md)     # what rescore() measures keywords on
         for f in ("proposal.md", "proposal.pdf"):    # a pending proposal was built on the old version
             (self.vdir / f).unlink(missing_ok=True)
+        # Keywords now; skills and experience carry over until rescore() re-rates them (the app calls it next).
+        prior = self.prior(h, base)
+        scores = {**self.scores(prior["ratings"], prior["score"], pdf_text or md, rerated=False),
+                  "rating": True} if prior else {}
         h["versions"].append({"n": n, "created": _now(), "source": "by hand", "instruction": "", "changes": changes,
                               "keywords_pct": self.keyword_pct(md), "check": self.check(self.vdir / f"v{n}.md"),
-                              "pages": pages})
+                              "pages": pages, "base": base, **scores})
         dropped = bool(h.get("proposal"))
         h["current"], h["proposal"] = n, None
         self._save(h)
         self._export(n)
         self._say("note", f"{changes[:-1]}, saved as v{n}." + (" Claude's pending proposal was discarded." if dropped else ""))
         return {**h, "pages": pages}
+
+    async def rescore(self, n: int, runner: Runner, cfg: Config) -> Optional[dict]:
+        """Re-rate a hand-edited version against the one it was built on, and store its scores.
+        Returns the version, or None when it has nothing waiting to be rated."""
+        h = await asyncio.to_thread(self.history)
+        v = next((v for v in h["versions"] if v["n"] == n), None)
+        if not v or not v.get("rating"):
+            return v
+        base = v.get("base") or n - 1
+        prior = self.prior(h, base)
+        txt = self.vdir / f"v{n}.pdf.txt"
+        r = await self.rerate(self.md(n), self.md(base), prior, runner, cfg) if prior else None
+        h = self.history()                         # re-read: the chat may have saved meanwhile
+        v = next(v for v in h["versions"] if v["n"] == n)
+        if r:
+            v.update(self.scores(r["ratings"], r["score"], txt.read_text() if txt.exists() else self.md(n)))
+        v["rating"] = False
+        self._save(h)
+        return v
 
     def _export(self, n: int) -> None:
         """Keep resume-final.md and the deliverable PDF equal to the current version."""

@@ -135,8 +135,8 @@ def test_tailoring_reviews_unbacked_lines_and_adds_supported_keywords(tmp_dirs):
     p.runner = runner = EvidenceRunner()
     c = asyncio.run(p.tailor_job(make_job("best")))
     labels = [x.label for x in runner.calls]
-    assert labels[labels.index("merge"):] == ["merge", "honesty-fix", "rate-final", "merge-restore", "rate-final",
-                                              "report"]
+    rate = ["rate-final-1", "rate-final-2", "rate-final-3"]
+    assert labels[labels.index("merge"):] == ["merge", "honesty-fix", *rate, "merge-restore", *rate, "report"]
     fix = next(x for x in runner.calls if x.label == "honesty-fix")
     assert "640" in fix.documents["honesty.md"] and "rescope" in fix.instructions
     restore = next(x for x in runner.calls if x.label == "merge-restore")

@@ -1364,7 +1364,8 @@ function fullBlock(j, d) {
           h("h3", {}, "Full score"),
           h("div", { class: "band" }, n == null ? "" : BANDS.find(([min]) => n >= min)[1]),
           h("p", {}, "The tailoring run rated every requirement: impact record ", h("b", {}, n ?? "–"), "/10, tailored résumé ",
-            h("b", {}, j.resume_score ?? "–"), "/10, ATS ", h("b", {}, pct(j.ats_total)), ". See Fit report and Heat map."))));
+            h("b", {}, j.resume_score ?? "–"), "/10, ATS ", h("b", {}, pct(j.ats_total)),
+            ". The résumé and ATS scores follow the current version: every edit is rated again. See Fit report and Heat map."))));
   }
   if (!f) {
     return h("div", { class: "notice" }, h("h3", {}, "Full score"),
@@ -1441,12 +1442,12 @@ async function renderReport(d, panel) {
 }
 
 // ---- résumé workspace ---------------------------------------------------------------------------
-function reloadResume(id) {
+async function reloadResume(id) {
   const j = S.byId.get(id);
   if (!j?.local || !j.tailored) { renderDetail(); return; }   // an outside résumé: renderOutside reloads it
   S.details.delete(id);
+  await loadJobs();         // the job's scores first (they follow the current version), then the panel showing them
   loadDetail(id);
-  loadJobs();
 }
 function renderResume(d, panel) {
   const r = d.resume;
@@ -1474,6 +1475,7 @@ function renderResume(d, panel) {
     h("p", { class: "muted chat-hint" }, "Enter sends, Shift+Enter adds a line. Claude only changes the résumé when you ask, and you see every change before it's saved."));
   const proposalBox = h("div");
   const metrics = h("div", { class: "card" }, h("h3", {}, `Current version: v${r.current}`),
+    cur?.rating && h("p", { class: "muted" }, spinner(), " Re-rating this edit: ATS shows the new keywords; skills and experience follow in a few seconds."),
     scoreMeters(S.byId.get(d.id), cur),
     h("div", { class: "metrics" },
       h("span", {}, "Keywords ", h("b", {}, pct(cur?.keywords_pct))),
@@ -1648,6 +1650,11 @@ async function openPageEditor(d, pane) {
       const warn = [res.pages > 2 && `it runs to ${res.pages} pages`, check?.passed === false && "the format check failed"].filter(Boolean);
       toast(`Saved as v${res.current}. The deliverable PDF now matches it.` + (warn.length ? ` Note: ${warn.join(" and ")}.` : ""), warn.length > 0);
       reloadResume(d.id);
+      if (res.versions.find((v) => v.n === res.current)?.rating) {   // keywords are in; re-rate skills and experience
+        post(`/api/jobs/${id}/resume/rescore`, { n: res.current })
+          .then(() => reloadResume(d.id))
+          .catch((e) => toast(`Couldn't re-rate the edit: ${e.message}`, true));
+      }
     } catch (e) {
       toast(e.message, true);
       modeBtn.disabled = cancel.disabled = false;
@@ -1657,10 +1664,13 @@ async function openPageEditor(d, pane) {
 }
 
 // The résumé's numbers drawn to scale: fit and résumé out of 10, ATS and keywords out of 100.
+// Résumé and ATS are the version's own (each edit is re-rated), else the tailoring run's.
+const versionAts = (j, v) => v?.ats ?? j?.ats_total;
+const versionScore = (j, v) => v?.resume_score ?? j?.resume_score;
 function scoreMeters(j, cur) {
   const pctBand = (v) => (v >= 80 ? "hi" : v >= 60 ? "mid" : "lo");
-  const rows = [["Fit", j && score(j), 10, "/10", fitClass], ["Résumé", j?.resume_score, 10, "/10", fitClass],
-                ["ATS", j?.ats_total, 100, "%", pctBand], ["Keywords", cur?.keywords_pct, 100, "%", pctBand]]
+  const rows = [["Fit", j && score(j), 10, "/10", fitClass], ["Résumé", versionScore(j, cur), 10, "/10", fitClass],
+                ["ATS", versionAts(j, cur), 100, "%", pctBand], ["Keywords", cur?.keywords_pct, 100, "%", pctBand]]
     .filter(([, v]) => v != null);
   if (!rows.length) return null;
   return h("div", { class: "meters" }, ...rows.map(([label, v, max, unit, band]) => h("div", { class: `meter ${band(v)}` },
@@ -1675,15 +1685,21 @@ function checkBadge(check) {
 function renderProposal(d, p, box, frame, cur) {
   const id = encodeURIComponent(d.id);
   frame.src = fileUrl(`/api/jobs/${id}/resume/proposal.pdf`) + `&n=${Date.now()}`;
-  const kwDelta = p.keywords_pct != null && cur?.keywords_pct != null ? p.keywords_pct - cur.keywords_pct : null;
+  const j = S.byId.get(d.id);
+  const delta = (now, was, unit = "") => {
+    const dv = now != null && was != null ? Math.round((now - was) * 10) / 10 : 0;
+    return dv ? ` (${dv > 0 ? "+" : ""}${unit === "%" ? Math.round(dv) : dv})` : "";
+  };
   const accept = h("button", { class: "primary" }, "Accept");
   const discard = h("button", { class: "ghost danger" }, "Discard");
   box.replaceChildren(h("div", { class: "card" },
     h("h3", {}, "Proposed edit (PDF on the left shows it)"),
     h("p", { class: "muted" }, `“${p.instruction}”`),
     h("div", { class: "metrics" },
-      h("span", {}, "Keywords ", h("b", {}, pct(p.keywords_pct)),
-        kwDelta != null && kwDelta !== 0 ? ` (${kwDelta > 0 ? "+" : ""}${Math.round(kwDelta)})` : ""),
+      p.ats != null && h("span", { title: p.rerated === false ? "Couldn't re-rate the requirements, so skills and experience are the last version's; keywords are measured on this PDF." : "Skills and experience re-rated for this edit, keywords measured on this PDF" },
+        "ATS ", h("b", {}, pct(p.ats)), delta(p.ats, versionAts(j, cur), "%"), p.rerated === false ? " (keywords only)" : ""),
+      p.resume_score != null && h("span", {}, "Résumé ", h("b", {}, p.resume_score), "/10", delta(p.resume_score, versionScore(j, cur))),
+      h("span", {}, "Keywords ", h("b", {}, pct(p.keywords_pct)), delta(p.keywords_pct, cur?.keywords_pct, "%")),
       h("span", {}, "Format check ", checkBadge(p.check)),
       h("span", {}, "Pages ", h("b", { class: p.pages === 2 ? "" : "fail" }, p.pages))),
     h("h3", {}, "Claude's note"),
@@ -2418,7 +2434,8 @@ const AI = { data: null, base: "", models: [] };
 const aForm = $("#ai-form"), aField = (n) => aForm.elements.namedItem(n);
 const AI_STAGES = [["triage", "Quick score", "one short call per job"],
                    ["analysis", "Analysis", "reading the posting, matching your evidence"],
-                   ["writer", "Writing", "the résumé drafts and the merge"]];
+                   ["writer", "Writing", "the résumé drafts and the merge"],
+                   ["rescore", "Live scores", "re-rating each résumé edit in the chat"]];
 const AI_NOTES = {
   "claude-code": "Uses your Claude Pro or Max plan through Claude Code, so there's nothing to pay per call. Sign in once with the button below.",
   api: "Pays per call with a Claude API key (console.anthropic.com).",
@@ -2490,7 +2507,10 @@ function aiProviderShown(changed) {
   if (b === "claude-code") claudeStatus();
   if (changed) {                                      // a different family of models: the old names won't work
     const wasClaude = isClaude(AI.lastBackend ?? AI.data.backend);
-    if (isClaude(b) !== wasClaude || !isClaude(b)) for (const [s] of AI_STAGES) $(`#ai-model-${s}`).value = isClaude(b) ? AI.data.claude_models[0] : "";
+    if (isClaude(b) !== wasClaude || !isClaude(b)) for (const [s] of AI_STAGES) {
+      const small = s === "rescore" && AI.data.claude_models.find((m) => m.includes("sonnet"));
+      $(`#ai-model-${s}`).value = isClaude(b) ? small || AI.data.claude_models[0] : "";
+    }
   }
   AI.lastBackend = b;
   setModels(isClaude(b) ? AI.data.claude_models : []);

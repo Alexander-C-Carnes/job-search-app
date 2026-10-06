@@ -63,6 +63,37 @@ def scorecard(ratings: dict, keywords: dict, texts: dict[str, str],
     return out
 
 
+FINAL_RATINGS = 3      # independent ratings of the final resume, combined by synthesize_ratings
+
+
+def synthesize_ratings(runs: list[dict], source: str) -> dict:
+    """Combine independent ratings.json files for `source` into one: each row takes the median rating
+    (with three runs, the majority, or partial when all three differ; with two, the lower), and the score
+    the median (with two, the lower). The other sources' columns come from the first run, since a rater
+    keeps them unchanged. Each row's note is from a run that gave the chosen rating."""
+    out = json.loads(json.dumps(runs[0]))
+    i = out["sources"].index(source)
+    cols = [r["sources"].index(source) for r in runs]
+
+    def pick(vals: list) -> int:            # the index (into runs) of the median value
+        order = sorted(range(len(vals)), key=lambda k: vals[k])
+        return order[(len(vals) - 1) // 2]
+    for sec in ("skills", "experience"):
+        for n, row in enumerate(out.get(sec) or []):
+            vals = [VALUE[r[sec][n]["ratings"][c].lower()] for r, c in zip(runs, cols)]
+            k = pick(vals)
+            row["ratings"][i] = runs[k][sec][n]["ratings"][cols[k]]
+            if row.get("notes") and len(runs[k][sec][n].get("notes") or []) > cols[k]:
+                row["notes"][i] = runs[k][sec][n]["notes"][cols[k]]
+    scores = [float(r["scores"][c]) for r, c in zip(runs, cols)]
+    out["scores"][i] = scores[pick(scores)]
+    out["runs"] = {"source": source, "scores": scores,
+                   "rows_agreeing": sum(len({r[sec][n]["ratings"][c].lower() for r, c in zip(runs, cols)}) == 1
+                                        for sec in ("skills", "experience") for n in range(len(out.get(sec) or []))),
+                   "rows": sum(len(out.get(sec) or []) for sec in ("skills", "experience"))}
+    return out
+
+
 def scorecard_table(card: dict[str, dict]) -> str:
     fmt = lambda v: "n/a" if v is None else f"{v:.0f}%"
     lines = ["| Source | Skills | Experience | Keywords | Total |", "|---|---|---|---|---|"]
@@ -580,16 +611,28 @@ class Tailor:
         (run_dir / "checks-final.md").write_text(out + "\n")
         final_md = await self._honesty(final_md, title, jd_md, match_md, index, run_dir, warnings)
 
-        async def rate_final(md: str) -> dict:
+        async def rate_once(md: str, n: int) -> dict:
+            out = f"ratings-final-{n}.json"
             res = await self._checked(
-                AgentCall(label="rate-final", model=A,
-                          instructions=RATER_BRIEF.format(out="ratings-final.json")
-                          + '\nNew source: ["Tailored resume"]',
+                AgentCall(label=f"rate-final-{n}", model=A,
+                          instructions=RATER_BRIEF.format(out=out) + '\nNew source: ["Tailored resume"]',
                           documents={"jd.md": jd_md, "ratings.json": json.dumps(ratings, indent=2),
                                      "resume-final.md [Tailored resume]": md},
-                          expect=["ratings-final.json"], run_dir=run_dir),
-                {"ratings-final.json": lambda t: check_ratings(t, base_sources + ["Tailored resume"])})
-            return json.loads(res.files["ratings-final.json"])
+                          expect=[out], run_dir=run_dir),
+                {out: lambda t: check_ratings(t, base_sources + ["Tailored resume"])})
+            return json.loads(res.files[out])
+
+        async def rate_final(md: str) -> dict:
+            """The final resume rated FINAL_RATINGS times independently, in parallel, and synthesized."""
+            runs = await asyncio.gather(*(rate_once(md, n) for n in range(1, FINAL_RATINGS + 1)),
+                                        return_exceptions=True)
+            good = [r for r in runs if isinstance(r, dict)]
+            if not good:
+                raise runs[0]
+            if len(good) < len(runs):
+                warnings.append(f"final rating: {len(runs) - len(good)} of {len(runs)} raters failed; "
+                                f"synthesized the other {len(good)}")
+            return synthesize_ratings(good, "Tailored resume")
 
         ratings_final = await rate_final(final_md)
         md_card = scorecard(ratings_final, keywords, {"Tailored resume": final_md})["Tailored resume"]

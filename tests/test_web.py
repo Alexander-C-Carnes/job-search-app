@@ -1,5 +1,6 @@
 """The local web app: auth, job board + Notion, résumé edit loop, searches, runs, notes."""
 import json
+import re
 import shutil
 import sys
 import threading
@@ -456,6 +457,58 @@ def test_edit_propose_accept_restore(env):
     assert h["current"] == 3 and (run_dir / "resume-final.md").read_text() == _resume()
 
 
+def _ratings(run_dir):
+    """The tailoring run's ratings: two skills rows and one experience row; the tailored résumé is the second source."""
+    (run_dir / "ratings-final.json").write_text(json.dumps({
+        "sources": ["Platform resume", "Tailored resume"], "scores": [6, 8],
+        "skills": [{"requirement": "Program management", "weight": "High", "ratings": ["strong", "strong"]},
+                   {"requirement": "Reliability", "weight": "Med", "ratings": ["missing", "partial"]}],
+        "experience": [{"requirement": "Cross-team launches", "weight": "High", "ratings": ["partial", "partial"]}]}))
+
+
+def test_edit_is_rerated_and_its_scores_become_the_jobs(env):
+    c, runner = env["client"], env["runner"]
+    _ratings(env["run_dir"])
+    rerate = AgentResult(files={"ratings.json": json.dumps(
+        {"skills": ["strong", "strong"], "experience": ["strong"], "score": 9})}, summary="")
+    pipeline_run = runner.pipeline.run
+
+    async def run(call):
+        return rerate if call.label == "resume-rerate" else await pipeline_run(call)
+    runner.pipeline.run = run
+
+    v1 = c.get("/api/jobs/j1", headers=H).json()["resume"]["versions"][0]
+    # skills (3*1 + 2*.5)/5 = 80, experience 50, keywords 100: .35*80 + .35*50 + .3*100
+    assert v1["ats"] == 75.5 and v1["resume_score"] == 8 and v1["ats_parts"]["skills"] == 80.0
+
+    p = c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Lead with reliability"}).json()["proposal"]
+    assert p["ats"] == 100.0 and p["resume_score"] == 9.0 and p["rerated"] is True
+    call = next(x for x in runner.calls if x.label == "resume-rerate")
+    assert call.model == config.ModelCfg("claude-sonnet-5-5", "medium") and call.candidate is False   # light
+    assert "Score each" not in call.instructions and "scoring-and-report.md" in call.documents
+    reqs = json.loads(call.documents["requirements.json"])
+    assert [r["previous"] for r in reqs["skills"]] == ["strong", "partial"] and reqs["previous_score"] == 8
+    assert "+ " in call.documents["changes.md"] and "reliability first" in call.documents["resume-edited.md"]
+    job = lambda: next(j for j in c.get("/api/jobs", headers=H).json()["jobs"] if j["id"] == "j1")
+    assert job()["ats_total"] == 83.0                       # a proposal changes nothing yet
+
+    c.post("/api/jobs/j1/edit/accept", headers=H)
+    assert (job()["ats_total"], job()["resume_score"]) == (100.0, 9.0)
+    c.post("/api/jobs/j1/restore", headers=H, json={"n": 1})
+    assert (job()["ats_total"], job()["resume_score"]) == (75.5, 8)
+
+
+def test_failed_rerating_keeps_the_edit_and_rescores_keywords_only(env):
+    c = env["client"]
+    _ratings(env["run_dir"])
+    env["runner"].reply = re.sub(r"(?i)technical program manag\w*", "program lead", _resume())   # drops the TPM keyword
+    p = c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Say program lead"}).json()["proposal"]
+    # FakeRunner writes no ratings.json: skills/experience carry over, keywords drop to 50%
+    assert p["rerated"] is False and p["resume_score"] == 8 and p["ats"] == 60.5
+    c.post("/api/jobs/j1/edit/accept", headers=H)
+    assert next(j for j in c.get("/api/jobs", headers=H).json()["jobs"] if j["id"] == "j1")["ats_total"] == 60.5
+
+
 def test_edit_discard_and_validation(env):
     c = env["client"]
     assert c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "  "}).status_code == 400
@@ -512,6 +565,36 @@ def test_edit_as_text_and_its_checks(env):
     assert r.json()["current"] == 2 and r.json()["proposal"] is None    # the proposal was built on v1
     assert not (env["run_dir"] / "versions" / "proposal.md").exists()
     assert "10+ years" in (env["run_dir"] / "resume-final.md").read_text()
+
+
+def test_hand_edit_scores_keywords_at_once_then_rescore_rates_the_rest(env):
+    c, runner = env["client"], env["runner"]
+    _ratings(env["run_dir"])
+    pipeline_run = runner.pipeline.run
+
+    async def run(call):
+        if call.label == "resume-rerate":
+            return AgentResult(files={"ratings.json": json.dumps(
+                {"skills": ["strong", "strong"], "experience": ["partial"], "score": 9})}, summary="")
+        return await pipeline_run(call)
+    runner.pipeline.run = run
+    job = lambda: next(j for j in c.get("/api/jobs", headers=H).json()["jobs"] if j["id"] == "j1")
+    md = re.sub(r"(?i)technical program manag\w*", "program lead", _resume())     # drops the TPM keyword
+    h = c.post("/api/jobs/j1/resume/page", headers=H, json={"base": 1, "markdown": md}).json()
+    v = h["versions"][-1]
+    # skills/experience carried over from v1 (80, 50), keywords 50%: .35*80 + .35*50 + .3*50
+    assert v["rating"] is True and v["rerated"] is False and v["ats"] == 60.5 and v["base"] == 1
+    assert job()["ats_total"] == 60.5                                   # the job's ATS moved already
+    assert not any(x.label == "resume-rerate" for x in runner.calls)
+
+    v = c.post("/api/jobs/j1/resume/rescore", headers=H, json={"n": 2}).json()["version"]
+    call = next(x for x in runner.calls if x.label == "resume-rerate")
+    assert "program lead" in call.documents["resume-edited.md"] and "- " in call.documents["changes.md"]
+    # skills 100, experience 50, keywords 50
+    assert v["rating"] is False and v["rerated"] is True and v["ats"] == 67.5 and v["resume_score"] == 9.0
+    assert (job()["ats_total"], job()["resume_score"]) == (67.5, 9.0)
+    assert c.post("/api/jobs/j1/resume/rescore", headers=H, json={"n": 2}).json()["version"]["ats"] == 67.5  # no rerun
+    assert sum(x.label == "resume-rerate" for x in runner.calls) == 1
 
 
 def test_page_edits_keep_markdown_the_edit_does_not_touch():
@@ -1091,6 +1174,7 @@ def test_ai_settings(env, monkeypatch):
     c, searches = env["client"], env["searches"]
     a = c.get("/api/ai", headers=H).json()
     assert a["backend"] == "claude-code" and a["stages"]["writer"] == {"model": "claude-opus-5-5", "effort": "high"}
+    assert a["stages"]["rescore"] == {"model": "claude-sonnet-5-5", "effort": "medium"}
     assert {p["id"] for p in a["providers"]} >= {"claude-code", "api", "openai", "gemini", "ollama"}
     assert c.post("/api/ai/models", headers=H, json={"backend": "claude-code"}).json()["models"][0] == "claude-opus-5-5"
     assert c.post("/api/ai/models", headers=H, json={"backend": "openai"}).status_code == 400   # no key yet
@@ -1106,6 +1190,8 @@ def test_ai_settings(env, monkeypatch):
     assert "OPENAI_API_KEY=sk-new" in (config.PROFILE / ".env").read_text()
     assert oct((config.PROFILE / ".env").stat().st_mode & 0o777) == "0o600"
     assert config.load(searches).writer_model == config.ModelCfg("gpt-x", "medium")
+    # a page without the live-score row: OpenAI has no Sonnet, so it takes the quick-score model
+    assert config.load(searches).rescore_model == config.ModelCfg("gpt-x", "medium") == env["cfg"].rescore_model
     assert c.get("/api/summary", headers=H).json()["backend_label"] == "ChatGPT (OpenAI API)"
     a = c.put("/api/ai", headers=H, json={"backend": "ollama", "base_url": "http://127.0.0.1:11434/v1", "stages": stages}).json()
     assert a["base_url"] == "http://127.0.0.1:11434/v1" and "OPENAI_API_KEY=sk-new" in (config.PROFILE / ".env").read_text()

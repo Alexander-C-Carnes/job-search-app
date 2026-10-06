@@ -69,6 +69,15 @@ def test_request_shape_caching_and_parsing():
     assert runner.usage_log[0]["cache_read"] == 5
 
 
+def test_haiku_gets_no_effort_or_fallbacks():
+    ok = '<file name="ratings.json">\n{"a": 1}\n</file>\n<file name="04-match.md">\n# M\n</file>'
+    runner, seen = runner_with([(ok, "end_turn")])
+    asyncio.run(runner.run(call(model=ModelCfg("claude-haiku-4-5", "low"))))
+    headers, body = seen[0]
+    assert body["model"] == "claude-haiku-4-5" and "output_config" not in body and "fallbacks" not in body
+    assert "server-side-fallback" not in headers.get("anthropic-beta", "")
+
+
 def test_job_only_agents_get_no_candidate_materials():
     ok = '<file name="ratings.json">\n{}\n</file>\n<file name="04-match.md">\nx\n</file>'
     runner, seen = runner_with([(ok, "end_turn")])

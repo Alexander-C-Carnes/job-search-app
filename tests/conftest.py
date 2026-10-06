@@ -133,8 +133,8 @@ class FakeRunner:
             out["resume-final.md"] = md
             out["trace-final.md"] = _trace(md)
             out["merge-notes.md"] = "# Merge notes\nAll from Draft A.\n"
-        elif label == "rate-final":
-            out["ratings-final.json"] = json.dumps(_ratings(BASE_SOURCES + ["Tailored resume"], score=9))
+        elif label.startswith("rate-final-"):
+            out[f"ratings-final-{label[-1]}.json"] = json.dumps(_ratings(BASE_SOURCES + ["Tailored resume"], score=9))
         elif label == "report":
             out["report.md"] = f"# {TITLE} — Acme\n\nReport.\n"
             out["notion-summary.txt"] = "Acme wants a TPM. The role leads platform programs."

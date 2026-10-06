@@ -53,6 +53,11 @@ def preamble() -> str:
     return config.candidate().personalize(PREAMBLE)
 
 
+def older_claude(model: str) -> bool:
+    """A Claude model from before effort and refusal fallbacks (Haiku 4.5): send it neither."""
+    return model.startswith(OLDER_CLAUDE)
+
+
 def doc(name: str, text: str) -> str:
     return f'<document name="{name}">\n{text}\n</document>'
 
@@ -205,7 +210,7 @@ class ClaudeCodeRunner(_RetryingRunner):
         return [self.bin, "-p", "--output-format", "json", "--tools", "",
                 "--system-prompt-file", str(self._system_file(call.candidate)),
                 "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
-                "--model", call.model.model, "--effort", call.model.effort]
+                "--model", call.model.model] + ([] if older_claude(call.model.model) else ["--effort", call.model.effort])
 
     @staticmethod
     def child_env() -> dict[str, str]:
@@ -285,9 +290,10 @@ class ClaudeRunner(_RetryingRunner):
             system=self._system(call.candidate),
             messages=[{"role": "user", "content": self._user(call) + (
                 [{"type": "text", "text": extra_note}] if extra_note else [])}],
-            output_config={"effort": call.model.effort},
         )
-        if self.fallbacks:
+        if not older_claude(call.model.model):
+            kwargs["output_config"] = {"effort": call.model.effort}
+        if self.fallbacks and not older_claude(call.model.model):
             kwargs.update(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
         async with self.sem:
             async with self.client.beta.messages.stream(**kwargs) as stream:
@@ -329,7 +335,8 @@ PROVIDERS = {
                          signup="https://lmstudio.ai"),
     "openai-compatible": Provider("Another OpenAI-compatible API", "", "OPENAI_COMPATIBLE_API_KEY"),
 }
-CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5-20251001"]
+CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5"]
+OLDER_CLAUDE = ("claude-haiku-4-5",)
 BACKEND_LABELS = {"claude-code": "Claude (your subscription)", "api": "Claude API",
                   **{k: p.label for k, p in PROVIDERS.items()}}
 EFFORTS = {"low": "low", "medium": "medium", "high": "high"}   # anything else (max, xhigh) asks for high

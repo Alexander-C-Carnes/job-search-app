@@ -139,6 +139,8 @@ After rendering: confirm exactly two pages and run `pdftotext -layout` on the PD
 
 Write the report using the template and rubric in `references/scoring-and-report.md`, built from the agents' files: Job summary and What the job will be doing from `01-objectives.md`; scores, heat map, strongest fit, unconfirmed gaps, and scorecard stories from `04-match.md`; the ATS scorecard now including the final tailored resume as a row; "Posting-language keywords" and "Held back" from `merge-notes.md`. Build the heat map with `scripts/heatmap.py`.
 
+Rate the final tailored resume three times before the scorecard: launch three raters in a single turn, each adding it as the source "Tailored resume" to its own copy of `ratings.json` and scoring it 1-10, without seeing the others. Combine them into `ratings-final.json`: each row takes the rating at least two raters gave (partial when all three differ), and the score is the middle of the three. A single rating differs from the majority on about 3-7% of rows.
+
 Deliver: the PDF, `resume-final.md`, and the heat map HTML (share with the environment's file tool). Keep the run folder's intermediate files out of the outputs unless the user asks for them. End with the numbered questions about unconfirmed gaps.
 
 ## Stage 7: Log the job in the Notion job tracker (orchestrator)

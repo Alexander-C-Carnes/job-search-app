@@ -267,6 +267,8 @@ class Config:
     triage_model: ModelCfg = field(default_factory=lambda: ModelCfg(effort="low"))
     analysis_model: ModelCfg = field(default_factory=ModelCfg)
     writer_model: ModelCfg = field(default_factory=lambda: ModelCfg(effort="high"))
+    # Re-rating each résumé edit in the chat (live ATS and résumé scores): frequent, so a mid-priced model.
+    rescore_model: ModelCfg = field(default_factory=lambda: ModelCfg(model=LIVE_SCORE_MODEL, effort="medium"))
     fallbacks: bool = True
     # Which AI does the work: "claude-code" (Claude subscription), "api" (Claude API credits), or an
     # OpenAI-compatible provider from llm.PROVIDERS (openai, gemini, openrouter, ollama, lmstudio,
@@ -318,6 +320,17 @@ def _search(raw: dict, defaults: dict) -> Search:
     )
 
 
+LIVE_SCORE_MODEL = "claude-sonnet-5-5"
+
+
+def rescore_default(backend: str, triage: dict) -> dict:
+    """The live-score model when searches.yaml names none: Sonnet on Claude, else the quick-score model
+    (another provider has its own names for models)."""
+    if backend in ("claude-code", "api"):
+        return {"model": LIVE_SCORE_MODEL, "effort": "medium"}
+    return {"model": triage.get("model") or ModelCfg.model, "effort": triage.get("effort") or "low"}
+
+
 def _model(raw: Optional[dict], default: ModelCfg) -> ModelCfg:
     raw = raw or {}
     return ModelCfg(model=raw.get("model", default.model), effort=raw.get("effort", default.effort))
@@ -367,6 +380,8 @@ def load(path: Optional[Path] = None) -> Config:
         triage_model=_model(models.get("triage"), ModelCfg(effort="low")),
         analysis_model=_model(models.get("analysis"), ModelCfg(effort="medium")),
         writer_model=_model(models.get("writer"), ModelCfg(effort="high")),
+        rescore_model=_model(models.get("rescore"), ModelCfg(**rescore_default(
+            models.get("backend", "claude-code"), models.get("triage") or {}))),
         fallbacks=bool(models.get("fallbacks", True)),
         backend=models.get("backend", "claude-code"),
         claude_bin=models.get("claude_bin"),
