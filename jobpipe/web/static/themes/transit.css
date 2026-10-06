@@ -32,6 +32,8 @@ html[data-theme="transit"] {
   --radius: 6px;
   --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
   --body: "Barlow", "Arial Narrow", system-ui, sans-serif;
+  /* app.css's light round colours: its dark-mode pastels are unreadable on this light look */
+  --rd-pre-seed: #2f8f5b; --rd-seed: #1a7f43; --rd-a: #1d5fd0; --rd-b: #5b45c9; --rd-c: #8a3fb8; --rd-d: #b02a6e; --rd-growth: #a35f00; --rd-unknown: #6b7280;
   color-scheme: light;
 }
 /* the colour of words drawn on a stage's colour: ink on most lines, white only where ink is too dark (Done, Not Applying) */

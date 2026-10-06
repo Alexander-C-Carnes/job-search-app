@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/themes/bauhaus.css">
   <link rel="stylesheet" href="/static/themes/arcade.css">
   <script src="/static/theme.js" defer></script>
+  <script src="/static/themes/sorbet.js" defer></script>
   <script src="/static/themes/transit.js" defer></script>
   <script src="/static/themes/bauhaus.js" defer></script>
   <script src="/static/themes/arcade.js" defer></script>
@@ -134,7 +135,6 @@
             <input id="startup-filter" type="search" placeholder="Search startups, what they do, where they are" autocomplete="off">
           </label>
           <div class="seg" id="startup-views" role="group" aria-label="Which startups"></div>
-          <span id="startup-state" class="sync-state"></span>
           <button id="startup-refresh" class="ghost" title="Read the funding news, the YC directory and the VC boards again, then the startups' careers boards: roles matching your filters land in Find jobs (free, a few minutes)">Refresh sources</button>
           <button id="startup-add" class="primary">Add a startup…</button>
         </div>
@@ -147,6 +147,7 @@
               <option value="name">Name</option>
             </select>
           </label>
+          <span id="startup-state" class="sync-state"></span>
         </div>
       </div>
       <div class="jobs-body view-list startups-body">

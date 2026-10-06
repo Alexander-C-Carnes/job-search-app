@@ -32,6 +32,8 @@ html[data-theme="arcade"] {
   --pixel: "Press Start 2P", "Courier New", monospace;
   --pixel-lg: "Silkscreen", "Press Start 2P", "Courier New", monospace;
   --body: "Rubik", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* app.css's light round colours: its dark-mode pastels are unreadable on this light look */
+  --rd-pre-seed: #2f8f5b; --rd-seed: #1a7f43; --rd-a: #1d5fd0; --rd-b: #5b45c9; --rd-c: #8a3fb8; --rd-d: #b02a6e; --rd-growth: #a35f00; --rd-unknown: #6b7280;
   color-scheme: light;
 }
 html[data-theme="arcade"] body { font-family: var(--body); font-size: 14px; line-height: 1.45; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }

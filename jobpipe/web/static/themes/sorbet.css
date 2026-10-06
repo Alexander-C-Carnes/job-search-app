@@ -19,8 +19,14 @@ html[data-theme="sorbet"] {
   --st-applied: #75CB33; --st-done: #00A5E7; --st-denied: #C5617C; --st-not-applying: #7062A6;
   --st-interviewing: #2EC4B6; --st-offer: #FF3E7F;
   --chart: #FF3E7F;
+  /* funding rounds: candy, but dark enough to read on white (4.5:1+). Without these a Mac in dark mode
+     lent Sorbet app.css's dark-mode pastels, about 2.4:1 */
+  --rd-pre-seed: #18805A; --rd-seed: #3B7D12; --rd-a: #1F63D6; --rd-b: #6A3FD6; --rd-c: #9C2FB5; --rd-d: #C21B66; --rd-growth: #A65800; --rd-unknown: #6E6380;
   --shadow: 0 1px 2px rgba(42, 27, 61, .06), 0 8px 24px rgba(42, 27, 61, .08);
   --radius: 18px;
+  /* Sorbet's gooey motion: --open is a spring (bounce .5, 450ms response), --close a critically damped one */
+  --open: linear(0, 0.064, 0.179, 0.357, 0.516, 0.7, 0.835, 0.967, 1.063, 1.115, 1.149, 1.157, 1.149, 1.132, 1.105, 1.075, 1.051, 1.025, 1.007, 0.992, 0.982, 0.977, 0.975, 0.976, 0.979, 0.983, 0.988, 0.992, 0.996, 0.999, 1.001, 1.003, 1.004, 1.004, 1.004, 1.003, 1.003, 1.002, 1.001, 1.001, 1);
+  --close: linear(0, 0.049, 0.107, 0.211, 0.283, 0.389, 0.456, 0.546, 0.6, 0.67, 0.73, 0.764, 0.808, 0.833, 0.865, 0.883, 0.905, 0.918, 0.934, 0.943, 0.954, 0.963, 0.968, 0.974, 0.978, 0.982, 0.985, 0.988, 0.989, 0.991, 0.993, 0.994, 0.995, 0.996, 0.997, 0.997, 0.998, 0.998, 0.998, 0.999, 1);
   --display: "Fredoka", "Arial Rounded MT Bold", "Nunito Sans", system-ui, sans-serif;
   --body: "Nunito Sans", "Avenir Next", "Helvetica Neue", system-ui, sans-serif;
   color-scheme: light;
@@ -47,16 +53,36 @@ html[data-theme="sorbet"] .banner { background: #FFF1D6; color: #6B3E00; border-
 
 /* buttons, fields, segmented controls */
 html[data-theme="sorbet"] button.primary, html[data-theme="sorbet"] button.ghost, html[data-theme="sorbet"] .seg button {
-  border-radius: 999px; padding: 7px 14px; border: 2px solid var(--edge); background: var(--panel); font-weight: 700; transition: transform .12s ease, background-color .12s ease; }
+  border-radius: 999px; padding: 7px 14px; border: 2px solid var(--edge); background: var(--panel); font-weight: 700; transition: background-color .12s ease; }
 html[data-theme="sorbet"] button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 html[data-theme="sorbet"] button.primary:hover:not(:disabled) { opacity: 1; background: #3D2A57; border-color: #3D2A57; }
 html[data-theme="sorbet"] button.ghost:hover:not(:disabled) { background: var(--sel); border-color: var(--ink); }
-html[data-theme="sorbet"] button.primary:active, html[data-theme="sorbet"] button.ghost:active { transform: scale(.97); }
+/* gooey movement: buttons and chips lift on the look's spring and squish when pressed, then bounce back */
+html[data-theme="sorbet"] :is(button.primary, button.ghost, .chip) { transition: transform 620ms var(--open), background-color .15s ease, border-color .15s ease, color .15s ease; }
+@media (prefers-reduced-motion: no-preference) {
+  html[data-theme="sorbet"] :is(button.primary, button.ghost, .chip):hover:not(:disabled) { transform: translateY(-1px) scale(1.04); }
+  html[data-theme="sorbet"] :is(button.primary, button.ghost, .chip):active:not(:disabled) { transform: scale(.94); transition: transform 90ms ease-out; }
+}
 html[data-theme="sorbet"] button.small { padding: 4px 11px; font-size: 12.5px; }
 html[data-theme="sorbet"] button.danger { color: var(--bad); }
 html[data-theme="sorbet"] .seg { border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; }
 html[data-theme="sorbet"] .seg button { border: 0; border-radius: 0; margin-left: 0; padding: 6px 14px; color: var(--ink); background: var(--panel); }
 html[data-theme="sorbet"] .seg button.active { background: var(--ink); color: var(--paper); }
+/* The dark "you're here" scoop oozes to the button you pick. themes/sorbet.js adds .gooey and a .seg-goo of three
+   blobs under the #goo filter, at the active button's --x/--w: the head springs there, the body and the thinner tail
+   follow critically damped and a beat later, so the scoop stretches into a droplet on the way and pulls back round. */
+html[data-theme="sorbet"] .seg.gooey { position: relative; background: var(--panel); isolation: isolate; }
+html[data-theme="sorbet"] .seg.gooey button { position: relative; z-index: 1; background: transparent; transition: color .18s ease .1s; }
+html[data-theme="sorbet"] .seg.gooey button:not(.active):hover { color: var(--link); }
+html[data-theme="sorbet"] .seg-goo { position: absolute; inset: 0; z-index: 0; filter: url(#goo); pointer-events: none; }
+html[data-theme="sorbet"] .seg-goo i { position: absolute; top: 0; bottom: 0; left: var(--x, 0); width: var(--w, 0); border-radius: 999px; background: var(--ink);
+  transition: left var(--d) var(--e) var(--dl, 0s), width var(--d) var(--e) var(--dl, 0s), opacity .2s ease; }
+html[data-theme="sorbet"] .seg-goo .g1 { --d: 640ms; --e: var(--open); }
+html[data-theme="sorbet"] .seg-goo .g2 { --d: 560ms; --e: var(--close); --dl: 40ms; top: 3px; bottom: 3px; }
+html[data-theme="sorbet"] .seg-goo .g3 { --d: 700ms; --e: var(--close); --dl: 90ms; top: 7px; bottom: 7px; }
+html[data-theme="sorbet"] .seg-goo.none i { opacity: 0; }
+html[data-theme="sorbet"] .seg-goo.snap i { transition: none; }
+@media (prefers-reduced-motion: reduce) { html[data-theme="sorbet"] .seg-goo i { transition: none; } }
 html[data-theme="sorbet"] :is(input[type=search], input[type=text], input[type=number], input[type=url], input[type=email], input[type=tel], input:not([type]), textarea, select) {
   border: 2px solid var(--edge); border-radius: 12px; padding: 7px 10px; }
 html[data-theme="sorbet"] :is(input, textarea, select):focus { border-color: var(--accent); outline: none; }
@@ -67,6 +93,7 @@ html[data-theme="sorbet"] .link-btn { color: var(--link); font-weight: 600; }
 /* tools row and chips */
 html[data-theme="sorbet"] .jobs-tools { background: var(--paper); border-bottom: 0; padding: 12px 20px 8px; gap: 8px; }
 html[data-theme="sorbet"] .jobs-tools .tools-row:nth-child(2) { flex-wrap: wrap; gap: 10px 14px; }
+html[data-theme="sorbet"] .sync-state { font-size: 13px; }
 html[data-theme="sorbet"] .chip { border: 2px solid var(--edge); border-radius: 999px; padding: 5px 12px; font-weight: 600; color: var(--ink); background: var(--panel); }
 html[data-theme="sorbet"] .chip:hover { border-color: var(--ink); }
 html[data-theme="sorbet"] .chip b { font: 700 12.5px var(--display); color: var(--muted); }
@@ -273,10 +300,8 @@ html[data-theme="sorbet"] .fold-strip { background: var(--paper); border-bottom:
 /* Hovered (or focused), a scoop oozes into a pill with its stage's name: a droplet buds off on a neck of colour,
    the neck swells into the pill, then the name slides out from behind the count. It drains back without a bounce.
    The colour is drawn by .goo under the #goo filter (index.html), the text sits on top unfiltered and stays sharp.
-   --open is a spring (bounce .5, 450ms response), --close a critically damped one; app.js measures --num-w/--lab-w. */
+   --open and --close are the look's springs (top of this file); app.js measures --num-w/--lab-w. */
 html[data-theme="sorbet"] .mini-stage {
-  --open: linear(0, 0.064, 0.179, 0.357, 0.516, 0.7, 0.835, 0.967, 1.063, 1.115, 1.149, 1.157, 1.149, 1.132, 1.105, 1.075, 1.051, 1.025, 1.007, 0.992, 0.982, 0.977, 0.975, 0.976, 0.979, 0.983, 0.988, 0.992, 0.996, 0.999, 1.001, 1.003, 1.004, 1.004, 1.004, 1.003, 1.003, 1.002, 1.001, 1.001, 1);
-  --close: linear(0, 0.049, 0.107, 0.211, 0.283, 0.389, 0.456, 0.546, 0.6, 0.67, 0.73, 0.764, 0.808, 0.833, 0.865, 0.883, 0.905, 0.918, 0.934, 0.943, 0.954, 0.963, 0.968, 0.974, 0.978, 0.982, 0.985, 0.988, 0.989, 0.991, 0.993, 0.994, 0.995, 0.996, 0.997, 0.997, 0.998, 0.998, 0.998, 0.999, 1);
   --od: 930ms; --cd: 425ms;
   position: relative; display: inline-flex; align-items: center; height: 24px; min-width: 0; padding: 0; border: 0; border-radius: 999px;
   background: none; color: var(--ink); font: 700 12.5px/24px var(--display); white-space: nowrap; margin-inline: 0; transform: none;

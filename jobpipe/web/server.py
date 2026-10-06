@@ -214,7 +214,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
 
     @app.get("/", response_class=HTMLResponse)
     def index():
-        assets = ["app.css", "app.js", "vendor/editor.js", "theme-boot.js", "theme.js", "themes/sorbet.css",
+        assets = ["app.css", "app.js", "vendor/editor.js", "theme-boot.js", "theme.js", "themes/sorbet.css", "themes/sorbet.js",
                   *(f"themes/{n}.{x}" for n in ("transit", "bauhaus", "arcade") for x in ("css", "js"))]
         v = hashlib.blake2b("".join(str((STATIC / a).stat().st_mtime_ns) for a in assets).encode(), digest_size=6).hexdigest()
         html = (STATIC / "index.html").read_text()
