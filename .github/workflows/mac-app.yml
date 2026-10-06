@@ -44,7 +44,7 @@ jobs:
       since: ${{ steps.v.outputs.since }}
       build: ${{ steps.v.outputs.build }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: v
@@ -84,7 +84,7 @@ jobs:
             arch: x86_64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -123,7 +123,7 @@ jobs:
           fi
           mac/build.sh "${ARGS[@]}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dmg-${{ matrix.arch }}
           path: build/Job-Search-*.dmg
@@ -133,7 +133,7 @@ jobs:
     if: needs.version.outputs.release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dmgs
           merge-multiple: true
