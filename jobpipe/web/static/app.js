@@ -425,6 +425,14 @@ function foldAll() {
 }
 const foldAllButton = () => h("button", { class: "ghost small fold-all", title: "Fold the filters, the list and this header (⌘\\)",
   onclick: foldAll }, icon(allFolded() ? "down" : "up"), allFolded() ? "Unfold everything" : "Fold everything");
+// A look that opens a stage button into a pill with its name (Sorbet) needs the name's and the count's widths
+// to animate to; a look that keeps the name hidden gets it as a tooltip instead.
+function miniStageSize(e) {
+  const b = e.currentTarget, name = $(".lab > span", b);
+  b.style.setProperty("--num-w", `${$(".num", b).offsetWidth}px`);
+  b.style.setProperty("--lab-w", `${name.offsetWidth}px`);
+  b.title = getComputedStyle($(".lab", b)).display === "none" ? `${b.dataset.stage}: ${$(".num", b).textContent}. Click to show only these roles.` : "";
+}
 // The filters, folded: the stage counts as small buttons that still filter, and what's showing.
 function renderFoldStrip() {
   const strip = $("#fold-strip");
@@ -434,7 +442,10 @@ function renderFoldStrip() {
         const b = $(`#stages .stage[data-stage="${s}"]`);
         const n = b ? $(".n", b).textContent : "0";
         return h("button", { class: "mini-stage", "data-stage": s, "data-kind": PATH.includes(s) ? "path" : "side",
-          "aria-pressed": String(S.stages.has(s)), title: `${s}: ${n}. Click to show only these roles.`, onclick: () => b?.click() }, n);
+          "aria-pressed": String(S.stages.has(s)), "aria-label": `${s}: ${n}`, onclick: () => b?.click(),
+          onpointerenter: miniStageSize, onfocus: miniStageSize },
+          h("span", { class: "goo", "aria-hidden": "true" }, h("i", { class: "b1" }), h("i", { class: "b2" }), h("i", { class: "b3" })),
+          h("span", { class: "num" }, n), h("span", { class: "lab", "aria-hidden": "true" }, h("span", {}, s)));
       })
     : $$("#find-seg button").map((b) => h("button", { class: "chip", "aria-pressed": String(b.classList.contains("active")), onclick: () => b.click() },
         b.firstChild.textContent.trim(), " ", h("b", {}, $("b", b)?.textContent ?? "")));

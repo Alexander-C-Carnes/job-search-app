@@ -181,9 +181,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: updates
 
     // Compares this version with the newest GitHub release of JSUpdateRepo ("owner/repo") and offers it.
+    // Dev builds (0.0.0-dev, from a branch rather than a release tag) skip it: whoever built one has the source.
     func checkForUpdate() {
         guard let repo = info["JSUpdateRepo"] as? String, !repo.isEmpty,
-              let current = info["CFBundleShortVersionString"] as? String,
+              let current = info["CFBundleShortVersionString"] as? String, !current.contains("-"),
               let api = URL(string: "https://api.github.com/repos/\(repo)/releases/latest") else { return }
         URLSession.shared.dataTask(with: api) { data, _, _ in
             guard let data = data,

@@ -270,10 +270,38 @@ html[data-theme="sorbet"] .dash-table summary { font-weight: 700; color: var(--l
 
 /* folding: the strip's stages as little scoops, the rail and the one-line header in the same round shapes */
 html[data-theme="sorbet"] .fold-strip { background: var(--paper); border-bottom: 0; padding: 8px 20px; }
-html[data-theme="sorbet"] .mini-stage { height: 24px; min-width: 26px; padding: 0 8px; border: 0; border-radius: 999px; background: var(--c); color: var(--ink); font: 700 12.5px/24px var(--display); }
+/* Hovered (or focused), a scoop oozes into a pill with its stage's name: a droplet buds off on a neck of colour,
+   the neck swells into the pill, then the name slides out from behind the count. It drains back without a bounce.
+   The colour is drawn by .goo under the #goo filter (index.html), the text sits on top unfiltered and stays sharp.
+   --open is a spring (bounce .5, 450ms response), --close a critically damped one; app.js measures --num-w/--lab-w. */
+html[data-theme="sorbet"] .mini-stage {
+  --open: linear(0, 0.064, 0.179, 0.357, 0.516, 0.7, 0.835, 0.967, 1.063, 1.115, 1.149, 1.157, 1.149, 1.132, 1.105, 1.075, 1.051, 1.025, 1.007, 0.992, 0.982, 0.977, 0.975, 0.976, 0.979, 0.983, 0.988, 0.992, 0.996, 0.999, 1.001, 1.003, 1.004, 1.004, 1.004, 1.003, 1.003, 1.002, 1.001, 1.001, 1);
+  --close: linear(0, 0.049, 0.107, 0.211, 0.283, 0.389, 0.456, 0.546, 0.6, 0.67, 0.73, 0.764, 0.808, 0.833, 0.865, 0.883, 0.905, 0.918, 0.934, 0.943, 0.954, 0.963, 0.968, 0.974, 0.978, 0.982, 0.985, 0.988, 0.989, 0.991, 0.993, 0.994, 0.995, 0.996, 0.997, 0.997, 0.998, 0.998, 0.998, 0.999, 1);
+  --od: 930ms; --cd: 425ms;
+  position: relative; display: inline-flex; align-items: center; height: 24px; min-width: 0; padding: 0; border: 0; border-radius: 999px;
+  background: none; color: var(--ink); font: 700 12.5px/24px var(--display); white-space: nowrap; margin-inline: 0; transform: none;
+  transition: transform var(--cd) var(--close), margin var(--cd) var(--close), opacity .22s ease, filter .22s ease, box-shadow .2s ease; }
 html[data-theme="sorbet"] .mini-stage:is([data-stage="Denied"], [data-stage="Not Applying"]) { color: var(--paper); }
 html[data-theme="sorbet"] .mini-stage[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent); }
-html[data-theme="sorbet"] .mini-stage:hover { transform: translateY(-1px); }
+html[data-theme="sorbet"] .mini-stage .goo { display: block; position: absolute; inset: -10px; filter: url(#goo); pointer-events: none; }
+html[data-theme="sorbet"] .mini-stage .goo i { position: absolute; border-radius: 999px; background: var(--c); }
+html[data-theme="sorbet"] .mini-stage .b1 { left: 10px; top: 10px; height: 24px; width: var(--num-w, 26px); }
+html[data-theme="sorbet"] .mini-stage .b2 { left: 10px; right: 10px; top: 50%; height: 8px; transform: translateY(-50%); transition: height .11s ease; }
+html[data-theme="sorbet"] .mini-stage .b3 { right: 10px; top: 50%; width: 22px; height: 22px; transform: translateY(-50%) scale(.4); transition: transform var(--cd) var(--close); }
+html[data-theme="sorbet"] .mini-stage .num { position: relative; min-width: 26px; padding: 0 8px; text-align: center; }
+html[data-theme="sorbet"] .mini-stage .lab { display: inline-block; position: relative; width: 0; overflow: hidden; transition: width var(--cd) var(--close) 70ms; }
+html[data-theme="sorbet"] .mini-stage .lab > span { display: inline-block; padding-right: 10px; font-weight: 600; opacity: 0; transform: translateX(-10px); filter: blur(2px);
+  transition: opacity 80ms ease, transform .14s ease, filter 80ms ease; }
+html[data-theme="sorbet"] .mini-stage:is(:hover, :focus-visible) { z-index: 1; margin-inline: 6px; transform: translateY(-1px) scale(1.12);
+  transition: transform var(--od) var(--open), margin var(--od) var(--open), box-shadow .2s ease; }
+html[data-theme="sorbet"] .mini-stage:hover { box-shadow: 0 8px 16px -8px var(--c); }
+html[data-theme="sorbet"] .mini-stage[aria-pressed="true"]:hover { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent), 0 8px 16px -8px var(--c); }
+html[data-theme="sorbet"] .mini-stage:is(:hover, :focus-visible) .lab { width: var(--lab-w, auto); transition: width var(--od) var(--open); }
+html[data-theme="sorbet"] .mini-stage:is(:hover, :focus-visible) .b2 { height: 24px; transition: height 315ms var(--open) 170ms; }
+html[data-theme="sorbet"] .mini-stage:is(:hover, :focus-visible) .b3 { transform: translateY(-50%) scale(1); transition: transform var(--od) var(--open); }
+html[data-theme="sorbet"] .mini-stage:is(:hover, :focus-visible) .lab > span { opacity: 1; transform: none; filter: none;
+  transition: opacity .2s ease 190ms, transform var(--od) var(--open) 190ms, filter .2s ease 190ms; }
+html[data-theme="sorbet"] .minis:hover .mini-stage:not(:hover) { opacity: .55; filter: saturate(.7); }
 html[data-theme="sorbet"] .fold-what { font-size: 13px; }
 html[data-theme="sorbet"] .fold-search kbd { border: 1.5px solid var(--edge); border-radius: 6px; font-weight: 700; }
 html[data-theme="sorbet"] .joblist .rail { background: var(--paper); }
