@@ -236,6 +236,7 @@ class StartupsCfg:
     roles_exclude_titles: list[str] = field(default_factory=list)   # extra title words that rule a role out
     roles_signal_score: bool = False                 # score new startup roles against the impact record each refresh
     roles_score_per_refresh: int = 30                # at most this many scores (Claude calls) a refresh
+    roles_track_min_fit: Optional[int] = None        # a startup role scoring this or more goes to the tracker; None = notion.log_triaged_min_fit
     check_postings: bool = True                      # each refresh re-checks Find jobs' roles are still open
     auto_refresh_hours: float = 24                   # the app refreshes the sources on its own this often; 0 = never
 
@@ -290,6 +291,13 @@ class Config:
                 if t and t.lower() not in {x.lower() for x in out}:
                     out.append(t)
         return out
+
+    def track_min_fit(self, job_id: str = "") -> Optional[int]:
+        """The signal score at which a scored job goes to the tracker on its own (None: it waits in Find jobs).
+        Startup roles use startups.roles.track_min_fit when it's set, every other job notion.log_triaged_min_fit."""
+        if job_id.startswith("startup-") and self.startups.roles_track_min_fit is not None:
+            return self.startups.roles_track_min_fit
+        return self.notion_log_triaged_min_fit
 
     def search(self, search_id: str) -> Search:
         for s in self.searches:
@@ -364,6 +372,8 @@ def load(path: Optional[Path] = None) -> Config:
         roles_exclude_titles=_list((su.get("roles") or {}).get("exclude_titles")),
         roles_signal_score=bool((su.get("roles") or {}).get("signal_score", False)),
         roles_score_per_refresh=int((su.get("roles") or {}).get("score_per_refresh", 30) or 0),
+        roles_track_min_fit=(None if (su.get("roles") or {}).get("track_min_fit") is None
+                             else int(su["roles"]["track_min_fit"])),
         check_postings=bool(su.get("check_postings", True)),
         auto_refresh_hours=float(su.get("auto_refresh_hours", 24) or 0))
     return Config(

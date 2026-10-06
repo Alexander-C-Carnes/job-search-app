@@ -155,6 +155,10 @@ startups:
     # you want ("Signal-score N unscored"). At most score_per_refresh a refresh.
     signal_score: false
     score_per_refresh: 30
+    # A scored startup role at or above this fit goes straight to the tracker (Not started), as notion.log_triaged_min_fit
+    # does for searches. null = the same as notion.log_triaged_min_fit. `python -m jobpipe startups track` adds the
+    # ones already scored.
+    track_min_fit: null
   # While the app is open, refresh the sources on its own this often (hours). 0 = only when you click.
   auto_refresh_hours: 24
   # Each refresh also re-checks that the roles in Find jobs are still open (their page, or their applicant-tracking

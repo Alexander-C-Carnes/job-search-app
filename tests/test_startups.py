@@ -393,3 +393,35 @@ def test_scoring_startup_roles(tmp_dirs):
     assert len(su.unscored_startup_roles(jobs)) == 2 and "startup-y-stub-9" in su.unscored_startup_roles(jobs)
     n = asyncio.run(su.score_startup_roles(cfg, jobs, limit=5, log=lines.append, runner=FakeRunner()))
     assert n == 1 and any("no posting text" in l for l in lines) and len(su.unscored_startup_roles(jobs)) == 1
+
+
+def test_scored_startup_roles_go_to_the_tracker(tmp_dirs):
+    import asyncio
+    from conftest import FakeRunner
+    from jobpipe import config as cfgmod
+    from jobpipe.tracker import LocalTracker
+    jobs = Store()
+    for i in range(3):
+        jobs.save_job({"id": f"startup-x-role-{i}", "job_title": f"Role {i}", "company": "X", "url": f"https://x/{i}",
+                       "description": "Lead platform programs across teams. " * 30,
+                       "funding": {"round": "Series B", "amount": "$20M"}}, "startups")
+    tracker = LocalTracker(jobs.root / "tracker.db")
+    cfg = cfgmod.Config(searches=[])
+    # no floor set: scored roles wait in Find jobs
+    asyncio.run(su.score_startup_roles(cfg, jobs, limit=1, log=print, runner=FakeRunner(), tracker=tracker))
+    assert tracker.rows() == []
+    # startups.roles.track_min_fit: a role scoring at or above it is tracked as it's scored, others aren't
+    cfg.startups.roles_track_min_fit = 7
+    assert cfg.track_min_fit("startup-x-role-1") == 7 and cfg.track_min_fit("j9") is None
+    asyncio.run(su.score_startup_roles(cfg, jobs, limit=5, log=print, tracker=tracker,
+                                       runner=FakeRunner({"startup-x-role-2": 6})))
+    rows = {r["job_id"]: r for r in tracker.rows()}
+    assert set(rows) == {"startup-x-role-1"} and rows["startup-x-role-1"]["status"] == "Not started"
+    assert rows["startup-x-role-1"]["fit"] == 8 and "Quick fit 8/10" in rows["startup-x-role-1"]["notes"]
+    # the backfill adds the one scored before the floor was set, once; dismissed and lower ones stay out
+    jobs.save_job({"id": "startup-y-gone-1", "job_title": "Gone", "company": "Y", "url": "https://y/1"}, "startups")
+    jobs.update("startup-y-gone-1", triage={"fit_score": 9}, dismissed=True)
+    assert su.track_scored_roles(cfg, jobs, tracker=tracker, log=print) == 1
+    assert su.track_scored_roles(cfg, jobs, tracker=tracker, log=print) == 0
+    assert {r["job_id"] for r in tracker.rows()} == {"startup-x-role-0", "startup-x-role-1"}
+    assert su.track_scored_roles(cfg, jobs, min_fit=6, tracker=tracker, log=print) == 1

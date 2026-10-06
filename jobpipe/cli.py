@@ -200,6 +200,12 @@ def cmd_startups(cfg, args):
     elif args.what == "score":
         n = asyncio.run(su.score_startup_roles(cfg, Store(), limit=args.limit, log=print))
         print(f"Scored {n} startup role(s)")
+    elif args.what == "track":
+        floor = args.min_fit if args.min_fit is not None else cfg.track_min_fit("startup-")
+        if floor is None:
+            raise SystemExit("Set startups.roles.track_min_fit in searches.yaml, or pass --min-fit N")
+        n = su.track_scored_roles(cfg, Store(), min_fit=floor, log=print)
+        print(f"Added {n} startup role(s) scoring {floor}+ to the tracker")
 
     elif args.what == "list":
         rows = store.list()
@@ -329,6 +335,8 @@ def main(argv=None) -> None:
     q.add_argument("--limit", type=int, default=300, help="how many startups (newest raise first)")
     q = sp.add_parser("score", help="signal-score startup roles in Find jobs against the impact record")
     q.add_argument("--limit", type=int, default=30, help="at most this many (one Claude call each)")
+    q = sp.add_parser("track", help="add the scored startup roles in Find jobs at or above a fit score to the tracker")
+    q.add_argument("--min-fit", type=int, help="default: startups.roles.track_min_fit in searches.yaml")
     q = sp.add_parser("list")
     q.add_argument("--stage", help='e.g. "Series A"')
     q.add_argument("--hiring", action="store_true")

@@ -526,7 +526,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         today = date.today().isoformat()
         store.update(jid, triage=tri.__dict__, triaged_at=today)
         out: dict[str, Any] = {"id": jid, "triage": tri.__dict__, "triaged_at": today, "notion": ""}
-        floor = cfg.notion_log_triaged_min_fit
+        floor = cfg.track_min_fit(jid)
         # Same rule as a pipeline run: a good-enough score puts the job in the tracker. A tailored
         # job's row already carries the fuller scores from its run, so it is left alone.
         if not row["tailored"] and floor is not None and tri.fit_score >= floor:

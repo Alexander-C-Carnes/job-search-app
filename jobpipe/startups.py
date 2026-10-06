@@ -1264,9 +1264,10 @@ def unscored_startup_roles(jobs_store: Any) -> list[str]:
 
 
 async def score_startup_roles(cfg: Any, jobs_store: Any, *, limit: int = 30, log: Callable[[str], None] = print,
-                              runner: Any = None) -> int:
+                              runner: Any = None, tracker: Any = None) -> int:
     """Signal-score up to `limit` unscored startup roles (one short Claude call each, three at a time), so Find jobs
-    can be filtered by fit. `cfg` is the full Config. Returns how many were scored."""
+    can be filtered by fit, and put the ones scoring cfg.track_min_fit or more in the tracker. `cfg` is the full
+    Config. Returns how many were scored."""
     from .jd import build_jd
     from .pipeline import make_runner
     from .triage import Triage, triage_many
@@ -1284,13 +1285,53 @@ async def score_startup_roles(cfg: Any, jobs_store: Any, *, limit: int = 30, log
     log(f"Startup roles: scoring {len(todo)} against the impact record")
     results = await triage_many(runner or make_runner(cfg), cfg.triage_model, todo)
     today = datetime.now(timezone.utc).date().isoformat()
-    n = 0
+    scored = []
     for jid, r in results.items():
         if isinstance(r, Triage):
             jobs_store.update(jid, triage=r.__dict__, triaged_at=today)
             job = jobs_store.job(jid)
             log(f"  {r.fit_score}/10  {job.get('job_title')} @ {job.get('company')}: {r.one_line}")
-            n += 1
+            scored.append(jid)
         else:
             log(f"  {jid}: scoring failed ({r})")
+    track_scored_roles(cfg, jobs_store, scored, tracker=tracker, log=log)
+    return len(scored)
+
+
+def track_scored_roles(cfg: Any, jobs_store: Any, ids: Optional[list[str]] = None, *, min_fit: Optional[int] = None,
+                       tracker: Any = None, log: Callable[[str], None] = print) -> int:
+    """Put the scored startup roles (`ids`, or every one in Find jobs) at or above `min_fit` (default
+    cfg.track_min_fit) in the tracker as Not started, as a pipeline run does for its jobs. Dismissed, tailored and
+    already-tracked roles are left alone. Notion gets them in one sync at the end. Returns how many were added."""
+    from .pipeline import Candidate, make_tracker, tracker_entry
+    from .triage import Triage
+    state = jobs_store.state()
+    ids = [jid for jid in (ids if ids is not None else state) if jid.startswith("startup-")]
+    floor = min_fit if min_fit is not None else cfg.track_min_fit("startup-")
+    if floor is None:
+        return 0
+    todo = [jid for jid in ids if (st := state.get(jid) or {}).get("triage") and not st.get("dismissed")
+            and not st.get("tailored_at") and st["triage"].get("fit_score", 0) >= floor]
+    if not todo:
+        return 0
+    tracker = tracker or make_tracker(cfg, log)
+    tracked = {r.get("job_id") for r in tracker.rows()}
+    today = datetime.now(timezone.utc).date().isoformat()
+    n = 0
+    for jid in todo:
+        if jid in tracked:
+            continue
+        blank = {"band_reason": "", "role_family": "", "level_match": "", "hard_requirement_issues": [],
+                 "strongest_matches": [], "likely_gaps": [], "recommended_base": "", "one_line": ""}
+        tri = Triage(**{**blank, **{k: v for k, v in state[jid]["triage"].items() if k in Triage.__dataclass_fields__}})
+        e = tracker_entry(Candidate(jobs_store.job(jid), "startups", triage=tri), today)
+        if tracker.track(e, job_id=jid) == "created":
+            n += 1
+            log(f"  Tracker: added {e.title} @ {e.company} ({tri.fit_score}/10)")
+    if n:
+        log(f"Startup roles: {n} scoring {floor}+ added to the tracker")
+        try:
+            tracker.sync()
+        except Exception as e:  # noqa: BLE001 - they stay queued; the app's next sync sends them
+            log(f"  Notion didn't answer ({e}); they'll be copied there on the next sync")
     return n
