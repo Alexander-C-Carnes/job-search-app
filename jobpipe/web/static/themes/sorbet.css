@@ -75,12 +75,13 @@ html[data-theme="sorbet"] .chip[aria-pressed="true"] b { color: var(--paper); }
 html[data-theme="sorbet"] #find-seg b { font-family: var(--display); }
 
 /* the pipeline: a ribbon of scoops, the main line sized by count, the exits as small pills */
-html[data-theme="sorbet"] .stage-wrap { flex: 1 1 560px; min-width: 0; }
+/* the strip keeps its natural width (every label whole); when it and the chips don't fit on one line, the chips wrap below */
+html[data-theme="sorbet"] .stage-wrap { flex: 1 1 auto; min-width: auto; }
 html[data-theme="sorbet"] .stages { display: flex; align-items: center; background: none; border: 0; border-radius: 0; overflow: visible; padding: 3px 0 3px 3px; }
 html[data-theme="sorbet"] .stage { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
   height: 64px; padding: 2px 14px; border: 0; border-radius: 999px; background: var(--c); color: var(--ink); text-align: center;
   box-shadow: 0 0 0 3px var(--paper); transition: transform .15s ease, box-shadow .15s ease, flex-grow .3s ease; }
-html[data-theme="sorbet"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 1 0; min-width: 88px; }
+html[data-theme="sorbet"] .stage[data-kind="path"] { flex: max(var(--n, 1), 1) 0 auto; min-width: 88px; }
 html[data-theme="sorbet"] .stage[data-stage="Not started"] { order: 1; z-index: 7; }
 html[data-theme="sorbet"] .stage[data-stage="In progress"] { order: 2; z-index: 6; }
 html[data-theme="sorbet"] .stage[data-stage="Applied"] { order: 3; z-index: 5; }
@@ -261,7 +262,7 @@ html[data-theme="sorbet"] .dash-table summary { font-weight: 700; color: var(--l
   html[data-theme="sorbet"] .stage .n { font-size: 22px; }
   html[data-theme="sorbet"] .stage[data-kind="path"] { min-width: 80px; }
 }
-@media (max-width: 760px) {
+@media (max-width: 860px) {  /* below this the ribbon no longer fits with every label whole */
   html[data-theme="sorbet"] .stages { flex-wrap: wrap; gap: 8px; }
   html[data-theme="sorbet"] .stage[data-kind="path"] { flex: 1 1 42%; margin-left: 0; padding-left: 14px; }
   html[data-theme="sorbet"] .stage[data-kind="path"]:not([data-stage="Not started"]) { margin-left: 0; padding-left: 14px; }

@@ -671,7 +671,7 @@ dialog h2 + p { margin: -6px 0 12px; }
   .stage:nth-child(n+5) { border-top: 1px solid var(--line); }
   .topbar { flex-wrap: wrap; height: auto; row-gap: 0; }
   .tabs button { padding: 12px 2px; }
-  .chips { flex-wrap: wrap; }
+  .chips { flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
   .backend, #backend { display: none; }
   .split { grid-template-columns: 1fr; }
   .runs { max-height: 180px; border-right: 0; border-bottom: 1px solid var(--line); }
