@@ -312,10 +312,19 @@ class ResumeWorkspace:
                 + (f"\n\nThe posting's exact job title: {self.title()}" if self.title() else ""))
         call = AgentCall(label="resume-edit", model=cfg.writer_model, instructions=cand.personalize(EDIT_BRIEF),
                          documents=docs, expect=["reply.md"], tail=tail)
+        # The message is kept before Claude answers, so a page reloaded meanwhile still shows it.
+        self._say("user", instruction)
+        try:
+            return await self._answer(instruction, runner, cfg, call, h, current, pending)
+        except BaseException:       # a failure, or the request cancelled: the message isn't left unanswered
+            self._say("note", "Claude couldn't answer that message. Send it again to retry.")
+            raise
+
+    async def _answer(self, instruction: str, runner: Runner, cfg: Config, call: AgentCall,
+                      h: dict, current: str, pending: str) -> dict:
         res = await runner.run(call)
         reply = res.files["reply.md"].strip()
         new_md = res.files.get("resume-edited.md", "")
-        self._say("user", instruction)
         if not new_md.strip() or new_md.strip() == (pending or current).strip():
             self._say("claude", reply)
             return {"reply": reply, "proposal": None}

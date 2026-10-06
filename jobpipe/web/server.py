@@ -167,7 +167,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     prep_path = prep_path or store.root / "interview-prep.md"   # personal notes, in the profile's data/
     allowed = allowed_hosts or {"127.0.0.1", "localhost"}
     app = FastAPI(title="jobpipe", docs_url=None, redoc_url=None, openapi_url=None)
-    state: dict[str, Any] = {"runner": None, "edit_locks": {}, "reports": {}}
+    state: dict[str, Any] = {"runner": None, "edit_locks": {}, "reports": {}, "chatting": set()}
     # The tracker lives in data/tracker.db. Given a NotionTracker (or none), it is wrapped here; the first
     # run starts from the last Notion snapshot the app saved, so nothing tracked is lost in the move.
     local = tracker if isinstance(tracker, LocalTracker) else LocalTracker(
@@ -297,10 +297,18 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         match = linked.best_match(row["title"], row["company"], srcs)
         return match, bool(match), srcs
 
-    def resume_payload(ws: ResumeWorkspace) -> dict:
+    def resume_payload(ws: ResumeWorkspace, jid: str) -> dict:
         h = ws.history()
         return {"current": h["current"], "versions": h["versions"], "proposal": bool(h.get("proposal")),
-                "title": ws.title(), "editable": ws.editable(), "chat": chat_payload(ws)}
+                "title": ws.title(), "editable": ws.editable(), "chat": chat_payload(ws), "chat_busy": chat_busy(jid)}
+
+    def chat_busy(jid: str) -> bool:
+        """Claude is answering a chat message about this job's résumé."""
+        return jid in state["chatting"]
+
+    def edit_busy(jid: str) -> bool:
+        """A chat reply or a re-rating is in progress."""
+        return bool(state["edit_locks"].get(jid) and state["edit_locks"][jid].locked())
 
     def chat_payload(ws: ResumeWorkspace) -> list[dict]:
         return [{**m, "html": md_html(m["text"])} if m["role"] == "claude" else m for m in ws.chat()]
@@ -607,7 +615,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
                                   "has_heatmap": bool(heatmap_path(jid))}
         if row["tailored"]:
             ws = workspace(jid)
-            detail["resume"] = resume_payload(ws)
+            detail["resume"] = resume_payload(ws, jid)
             detail["has_report"] = bool(local_path(st.get("report"))) or (ws.run_dir / "report.md").exists()
         return detail
 
@@ -648,7 +656,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         src, matched, srcs = outside_resume(jid)
         ws = ResumeWorkspace(linked.workspace_dir(jid, src, store.root)) if src else None
         try:
-            resume = resume_payload(ws) if ws else None
+            resume = resume_payload(ws, jid) if ws else None
         except EditError as e:
             raise HTTPException(500, str(e)) from None
         return {"source": src and {"key": src["key"], "label": src["label"], "headline": src["headline"]},
@@ -797,7 +805,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     @app.post("/api/jobs/{jid}/resume/page")
     def save_resume_page(jid: str, body: dict):
         """Save an edit made by hand: {"base": n, "edits": [...]} from the page, or {"base": n, "markdown": str}."""
-        if state["edit_locks"].get(jid) and state["edit_locks"][jid].locked():
+        if edit_busy(jid):
             raise HTTPException(409, "Claude is still answering; wait for the reply, then save.")
         ws = workspace(jid)
         try:
@@ -844,6 +852,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         if lock.locked():
             raise HTTPException(409, "Claude is still answering your last message.")
         async with lock:
+            state["chatting"].add(jid)
             try:
                 r = await ws.propose(body.get("instruction", ""), get_runner(), cfg)
                 p = r["proposal"]
@@ -853,14 +862,16 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
                 raise HTTPException(400, str(e)) from None
             except Exception as e:  # noqa: BLE001 - surface Claude/CLI failures to the UI
                 raise HTTPException(502, f"Claude couldn't answer: {e}") from None
+            finally:
+                state["chatting"].discard(jid)
 
     @app.get("/api/jobs/{jid}/chat")
     def get_chat(jid: str):
-        return {"chat": chat_payload(workspace(jid))}
+        return {"chat": chat_payload(workspace(jid)), "busy": chat_busy(jid)}
 
     @app.post("/api/jobs/{jid}/chat/clear")
     def clear_chat(jid: str):
-        if state["edit_locks"].get(jid) and state["edit_locks"][jid].locked():
+        if edit_busy(jid):
             raise HTTPException(409, "Claude is still answering; wait for the reply.")
         return {"chat": workspace(jid).clear_chat()}
 

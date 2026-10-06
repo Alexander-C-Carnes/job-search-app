@@ -1088,7 +1088,10 @@ async function loadDetail(id) {
   try {
     const d = await api(`/api/jobs/${encodeURIComponent(id)}`);
     // Re-render only when what's below the header changed, so a revisit doesn't reload the PDF.
-    const sig = JSON.stringify([d.triage, d.triaged_at, d.full_score, d.full_scored_at, d.description.length, d.resume, d.has_report, d.has_heatmap]);
+    // The chat isn't part of it: CHATS holds it, and its panel redraws only itself.
+    const sig = JSON.stringify([d.triage, d.triaged_at, d.full_score, d.full_scored_at, d.description.length,
+                                d.resume && { ...d.resume, chat: null, chat_busy: null }, d.has_report, d.has_heatmap]);
+    if (d.resume) chatFromServer(id, d.resume.chat, d.resume.chat_busy);
     const old = S.details.get(id);
     S.details.set(id, { d, sig });
     if (S.selected === id && (!old || old.sig !== sig)) renderDetail();
@@ -1398,6 +1401,7 @@ async function renderOutside(j, panel) {
   const wrap = h("div", { class: "outside" }, h("div", { class: "outside-bar" },
     h("span", {}, o.matched ? "Matched by name: " : "Showing ", h("b", {}, o.source.label)), pick));
   panel.replaceChildren(wrap);
+  chatFromServer(j.id, o.resume.chat, o.resume.chat_busy);
   renderResume({ id: j.id, resume: o.resume }, wrap);
 }
 
@@ -1590,7 +1594,10 @@ function renderResume(d, panel) {
   const cur = r.versions.find((v) => v.n === r.current);
   // Chat with Claude about this résumé: questions get answers; a change you ask for comes back as a proposal.
   const thread = h("div", { class: "chat-thread", "aria-live": "polite" });
+  const chat = CHATS.get(d.id) || chatFromServer(d.id, r.chat, r.chat_busy);
   const instr = h("textarea", { rows: 2, placeholder: "Ask about this résumé, or tell Claude what to change…" });
+  instr.value = chat.draft;
+  instr.addEventListener("input", () => { chat.draft = instr.value; });
   const askBtn = h("button", { class: "primary" }, "Send");
   const newBtn = h("button", { class: "ghost small", title: "Clear this conversation (versions are kept)" }, "New chat");
   const askCard = h("div", { class: "card chat" },
@@ -1624,42 +1631,94 @@ function renderResume(d, panel) {
     : m.role === "user" ? h("div", { class: "msg me" }, m.text)
     : h("div", { class: "msg claude" }, h("div", { class: "markdown", html: m.html || "" }),
         m.proposal && h("div", { class: "msg-tag" }, "Proposed an edit"));
-  const showChat = (msgs, pending) => {
-    thread.replaceChildren(...(msgs.length ? msgs.map(bubble) : [h("div", { class: "msg claude intro" },
+  // Draws the chat from CHATS; this panel's copy replaces any earlier one's, so a reply that comes
+  // back after the panel was redrawn lands in the one on screen.
+  const paint = () => {
+    if (!thread.isConnected) return;
+    const near = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40;
+    thread.replaceChildren(...(chat.msgs.length ? chat.msgs.map(bubble) : [h("div", { class: "msg claude intro" },
       h("p", {}, "Ask me anything about this résumé and the role, or tell me what to change. When you ask for a change I'll propose it, and the PDF shows it before anything is saved."),
-      h("div", { class: "starters" }, ...starters.map((q) => h("button", { class: "ghost small", onclick: () => { instr.value = q; send(); } }, q))))]),
-      pending || "");
-    thread.scrollTop = thread.scrollHeight;
+      h("div", { class: "starters" }, ...starters.map((q) => h("button", { class: "ghost small", disabled: chat.busy, onclick: () => { instr.value = q; send(); } }, q))))]),
+      chat.busy ? h("div", { class: "msg claude pending" }, spinner(), " Claude is thinking…") : "");
+    if (near || chat.busy) thread.scrollTop = thread.scrollHeight;
+    askBtn.disabled = newBtn.disabled = chat.busy;
+    askBtn.title = chat.busy ? "Claude is still answering your last message" : "";
+    if (chat.busy && !chat.sending) watchChat(d.id);    // sent from before a reload, or from another window
   };
-  let msgs = r.chat || [];
-  showChat(msgs);
+  const showProposal = (p) => {
+    renderProposal(d, p, proposalBox, frame, cur);
+    proposalBox.scrollIntoView({ block: "start" });
+  };
+  const refocus = () => {      // the unsent text back in the box; don't undo the scroll to a proposal
+    instr.value = chat.draft;
+    instr.focus({ preventScroll: true });
+  };
+  chat.view = { paint, showProposal, refocus, isOn: () => thread.isConnected };
   async function send() {
     const text = instr.value.trim();
-    if (!text || askBtn.disabled) { instr.focus(); return; }
-    askBtn.disabled = newBtn.disabled = true;
-    instr.value = "";
-    showChat([...msgs, { role: "user", text }], h("div", { class: "msg claude pending" }, spinner(), " Claude is thinking…"));
+    if (!text || chat.busy) { instr.focus(); return; }
+    chat.busy = chat.sending = true;
+    chat.draft = instr.value = "";
+    chat.msgs = [...chat.msgs, { role: "user", text }];
+    chat.view.paint();
     try {
       const res = await post(`/api/jobs/${id}/edit`, { instruction: text });
-      msgs = res.chat;
-      showChat(msgs);
+      chat.msgs = res.chat;
+      chat.busy = chat.sending = false;
       if (res.proposal) {
-        renderProposal(d, res.proposal, proposalBox, frame, cur);
-        proposalBox.scrollIntoView({ block: "start" });
+        const cached = S.details.get(d.id)?.d;
+        if (cached?.resume) cached.resume.proposal = true;    // a redraw from the cache shows it too
+        if (chat.view.isOn()) chat.view.showProposal(res.proposal);
       }
-    } catch (e) { showChat(msgs); instr.value = text; toast(e.message, true); }
-    finally { askBtn.disabled = newBtn.disabled = false; instr.focus({ preventScroll: true }); }   // don't undo the scroll to a proposal
+    } catch (e) {
+      chat.busy = chat.sending = false;
+      if (!chat.draft) chat.draft = text;     // back in the box to send again
+      toast(e.message, true);
+      chat.msgs = chat.msgs.slice(0, -1);
+      await refreshChat(d.id);                // the server's copy: the message, and why it wasn't answered
+    }
+    if (chat.view.isOn()) { chat.view.paint(); chat.view.refocus(); }
   }
   askBtn.addEventListener("click", send);
   instr.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
   });
   newBtn.addEventListener("click", async () => {
-    if (!msgs.length) return;
-    try { msgs = (await post(`/api/jobs/${id}/chat/clear`)).chat; showChat(msgs); }
+    if (!chat.msgs.length || chat.busy) return;
+    try { chat.msgs = (await post(`/api/jobs/${id}/chat/clear`)).chat; paint(); }
     catch (e) { toast(e.message, true); }
   });
   if (r.proposal) api(`/api/jobs/${id}/edit`).then((res) => res.proposal && renderProposal(d, res.proposal, proposalBox, frame, cur));
+  paint();
+}
+
+// The résumé chat for each job, kept apart from its panel: the panel is redrawn whenever the job's
+// data changes (a sync, another tab or role), and a message waiting on Claude, or one half typed,
+// has to survive that. The server keeps a message as soon as it's sent and says while Claude is on it.
+const CHATS = new Map();     // job id -> {msgs, busy, sending, draft, view}
+function chatFromServer(id, msgs, busy) {
+  const c = CHATS.get(id) || { msgs: [], busy: false, sending: false, draft: "", view: null };
+  CHATS.set(id, c);
+  if (!c.sending) { c.msgs = msgs || []; c.busy = !!busy; }   // this window's own send knows better
+  c.view?.paint();
+  return c;
+}
+async function refreshChat(id) {
+  try {
+    const r = await api(`/api/jobs/${encodeURIComponent(id)}/chat`);
+    chatFromServer(id, r.chat, r.busy);
+  } catch { /* the next look at the job fetches it */ }
+}
+// Claude is answering a message this window didn't send (or sent before a reload): check back until it's done.
+function watchChat(id) {
+  const c = CHATS.get(id);
+  if (!c || c.watching) return;
+  c.watching = setTimeout(async () => {
+    c.watching = null;
+    if (c.sending || !c.view?.isOn()) return;        // the panel coming back watches again
+    await refreshChat(id);
+    if (!c.busy && c.msgs.at(-1)?.proposal) loadDetail(id);    // its proposed edit and scores
+  }, 2000);
 }
 
 // Edit on page: the current version drawn in the PDF's layout (the same CSS), every line

@@ -670,6 +670,39 @@ def test_chat_answers_questions_and_remembers_the_conversation(env):
     assert c.get("/api/jobs/j1", headers=H).json()["resume"]["current"] == 2   # versions survive a new chat
 
 
+
+def test_chat_keeps_the_message_while_claude_answers(env):
+    """The message is saved, and the chat says Claude is on it, before the reply: a page redrawn or
+    reloaded meanwhile still shows both."""
+    c, runner = env["client"], env["runner"]
+    get_chat = next(r.endpoint for r in env["app"].routes
+                    if getattr(r, "path", "") == "/api/jobs/{jid}/chat" and "GET" in r.methods)
+    seen = []
+    answer = runner.run
+
+    async def run(call):
+        seen.append(get_chat("j1"))
+        return await answer(call)
+    runner.run = run
+    assert c.get("/api/jobs/j1", headers=H).json()["resume"]["chat_busy"] is False
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "What's weakest?"})
+    assert seen[0]["busy"] is True and [m["text"] for m in seen[0]["chat"]] == ["What's weakest?"]
+    after = c.get("/api/jobs/j1/chat", headers=H).json()
+    assert after["busy"] is False and [m["role"] for m in after["chat"]] == ["user", "claude"]
+
+
+def test_chat_notes_a_message_claude_couldnt_answer(env):
+    c, runner = env["client"], env["runner"]
+
+    async def fail(call):
+        raise RuntimeError("CLI exited 1")
+    runner.run = fail
+    r = c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Tighten the summary"})
+    assert r.status_code == 502 and "CLI exited 1" in r.json()["detail"]
+    chat = c.get("/api/jobs/j1/chat", headers=H).json()
+    assert [(m["role"], m["text"][:6]) for m in chat["chat"]] == [("user", "Tighte"), ("note", "Claude")]
+    assert chat["busy"] is False
+
 def test_searches_edit_round_trip(env):
     c = env["client"]
     d = c.get("/api/searches", headers=H).json()
