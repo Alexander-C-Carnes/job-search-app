@@ -1,6 +1,8 @@
 """Run pipeline commands (`python -m jobpipe ...`) in the background and keep their output.
 
-Up to MAX_RUNS at once, so several jobs can be tailored side by side. Runs that would collide
+Up to MAX_RUNS at once, so several jobs can be tailored side by side. A run started with queue=True
+when that many are going (Make résumé) waits its turn instead of being refused, and starts by itself
+when one finishes; a waiting run exists only in memory until it starts. Runs that would collide
 share a `key` and wait for each other: searches (they spend JobsPipe credits and write the day's
 digest) go one at a time, and a job is never tailored by two runs at once. Each run is told its id
 (JOBPIPE_RUN_ID), and the store marks the jobs it changes with it, so a run's results are its own.
@@ -63,9 +65,12 @@ class Run:
     marks: Optional[dict[str, Any]] = None
     results: Optional[list[dict]] = None
     key: Optional[str] = None   # runs with the same key don't overlap (not saved: only running runs need it)
+    queued: bool = False        # waiting for a free slot; started by the manager when one opens
 
     @property
     def status(self) -> str:
+        if self.queued:
+            return "queued"
         if self.returncode is None:
             return "running" if self.proc else "interrupted"   # no process: loaded after the app restarted
         return "done" if self.returncode == 0 else ("stopped" if self.returncode < 0 else "failed")
@@ -84,6 +89,7 @@ class RunManager:
         self.cwd = cwd or config.ROOT
         self.db = db
         self.runs: dict[int, Run] = {}
+        self.waiting: list[Run] = []     # queued runs, first in first out
         self.lock = threading.Lock()
         self._next = 1
         if db is not None:
@@ -118,31 +124,60 @@ class RunManager:
     def active(self) -> Optional[Run]:
         return next(iter(self.running()), None)
 
-    def start(self, label: str, args: list[str], marks: Optional[dict[str, Any]] = None,
-              key: Optional[str] = None, busy: str = "") -> Run:
-        """marks: anything the caller needs later to see what the run changed; saved with it.
-        key: a run with the same key still going makes this one Busy, with the message `busy`."""
+    def start(self, label: str, args: list[str], marks: Any = None,
+              key: Optional[str] = None, busy: str = "", queue: bool = False) -> Run:
+        """marks: anything the caller needs later to see what the run changed; saved with it. A callable is
+        called when the run starts, so a queued run marks the state it starts from.
+        key: a run with the same key going or waiting makes this one Busy, with the message `busy`.
+        queue: when MAX_RUNS are going, wait for a free slot (status "queued") instead of raising Busy."""
         with self.lock:
             going = self.running()
-            if key and any(r.key == key for r in going):
+            if key and any(r.key == key for r in (*going, *self.waiting)):
                 raise Busy(busy or "That run is already going.")
-            if len(going) >= self.max_runs:
+            if len(going) >= self.max_runs and not queue:
                 raise Busy(f"{len(going)} runs are going, the most at once. Start this when one finishes.")
             run = Run(self._next, label, args, datetime.now(timezone.utc).isoformat(timespec="seconds"),
                       marks=marks, key=key)
             self._next += 1
-            # Unbuffered, so the Runs tab shows each line as it's printed rather than all of it at the end.
-            run.proc = subprocess.Popen([*self.argv_prefix, *args], cwd=self.cwd, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                        env={**os.environ, "PYTHONUNBUFFERED": "1", "JOBPIPE_RUN_ID": str(run.id)})
+            if len(going) >= self.max_runs or self.waiting:     # behind the runs already waiting, too
+                run.queued = True
+                self.waiting.append(run)
+            else:
+                self._launch(run)
             self.runs[run.id] = run
-            if self.db is not None:
-                with closing(self._db()) as con, con:
-                    con.execute("INSERT INTO runs(id, label, args, started, marks) VALUES(?, ?, ?, ?, ?)",
-                                (run.id, label, json.dumps(args), run.started,
-                                 json.dumps(marks) if marks is not None else None))
-        threading.Thread(target=self._pump, args=(run,), daemon=True).start()
         return run
+
+    def _launch(self, run: Run) -> None:
+        """Start the run's process (with the lock held)."""
+        run.started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        if callable(run.marks):
+            run.marks = run.marks()
+        # Unbuffered, so the Runs tab shows each line as it's printed rather than all of it at the end.
+        run.proc = subprocess.Popen([*self.argv_prefix, *run.args], cwd=self.cwd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                    env={**os.environ, "PYTHONUNBUFFERED": "1", "JOBPIPE_RUN_ID": str(run.id)})
+        run.queued = False         # only now: with no process yet it would read as interrupted
+        if self.db is not None:
+            with closing(self._db()) as con, con:
+                con.execute("INSERT INTO runs(id, label, args, started, marks) VALUES(?, ?, ?, ?, ?)",
+                            (run.id, run.label, json.dumps(run.args), run.started,
+                             json.dumps(run.marks) if run.marks is not None else None))
+        threading.Thread(target=self._pump, args=(run,), daemon=True).start()
+
+    def _start_waiting(self) -> None:
+        """Start queued runs while there are free slots."""
+        with self.lock:
+            while self.waiting and len(self.running()) < self.max_runs:
+                run = self.waiting.pop(0)
+                try:
+                    self._launch(run)
+                except Exception as e:  # noqa: BLE001 - a run that can't start fails; the next one still gets its turn
+                    run.lines.append(f"Couldn't start: {e}")
+                    run.returncode, run.finished = 1, datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def queue_position(self, run: Run) -> Optional[int]:
+        """1 for the next queued run to start, None when it isn't waiting."""
+        return self.waiting.index(run) + 1 if run in self.waiting else None
 
     def _pump(self, run: Run) -> None:
         assert run.proc and run.proc.stdout
@@ -164,6 +199,7 @@ class RunManager:
         finally:
             if con is not None:
                 con.close()
+            self._start_waiting()      # its slot is free
 
     def save_results(self, run: Run, results: list[dict]) -> None:
         run.results = results
@@ -173,6 +209,12 @@ class RunManager:
 
     def stop(self, run_id: int) -> Run:
         run = self.runs[run_id]
+        with self.lock:
+            if run.queued:             # never started: it leaves the queue, and nothing was saved
+                self.waiting.remove(run)
+                run.queued = False
+                run.returncode, run.finished = -15, datetime.now(timezone.utc).isoformat(timespec="seconds")
+                return run
         if run.proc and run.status == "running":
             run.proc.terminate()
         return run

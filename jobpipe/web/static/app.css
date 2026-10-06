@@ -273,11 +273,19 @@ html[data-theme] .fit.run-ring { border: 0; box-shadow: none; background: var(--
 .run-step b { color: var(--ink); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .run-step .eta { color: var(--link); white-space: nowrap; }
 .run-step .eta.slow { color: var(--warn); }
+/* waiting its turn: an empty dashed ring that turns slowly, a hollow dot that doesn't breathe */
+.run-ring.queued .trk { stroke-dasharray: 4 3.4; animation: run-queue 14s linear infinite; transform-origin: 20px 20px; }
+.run-ring.queued .tip { display: none; }
+.run-ring.queued .ring-t { font-size: 10px; color: var(--muted); }
+.run-step.queued .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); animation: none; }
+.run-step.queued .eta { color: var(--muted); }
+@keyframes run-queue { to { transform: rotate(360deg); } }
 @keyframes run-breathe { 50% { transform: scale(.6); opacity: .6; } }
 .fit.pop { animation: fit-pop .45s ease-out; }   /* a run just finished: the new score arrives */
 @keyframes fit-pop { from { transform: scale(.6); } }
 @media (prefers-reduced-motion: reduce) {
   .run-ring .arc, .run-ring .tip { transition: none; }
+  .run-ring.queued .trk { animation: none; }
   .run-step .dot, .fit.pop { animation: none; }
 }
 .star { border: 0; background: none; padding: 5px; border-radius: 6px; color: var(--faint); align-self: start; display: inline-flex; align-items: center; gap: 6px; }
@@ -535,7 +543,7 @@ html[data-theme] .fit.run-ring { border: 0; box-shadow: none; background: var(--
 .runs li { padding: 10px 12px; border-bottom: 1px solid var(--line); cursor: pointer; border-left: 3px solid transparent; }
 .runs li.selected { background: var(--sel); border-left-color: var(--accent); }
 .runs .st { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-.st.running { color: var(--link); } .st.done { color: var(--good); } .st.failed, .st.stopped { color: var(--bad); } .st.interrupted { color: var(--muted); }
+.st.running { color: var(--link); } .st.done { color: var(--good); } .st.failed, .st.stopped { color: var(--bad); } .st.interrupted, .st.queued { color: var(--muted); }
 .runlog { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .runlog-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); min-height: 46px; }
 .run-results { padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--panel); max-height: 45%; overflow: auto; flex: none; }

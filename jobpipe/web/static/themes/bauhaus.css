@@ -344,7 +344,7 @@ html[data-theme="bauhaus"] .st { display: inline-block; padding: 1px 6px; backgr
 html[data-theme="bauhaus"] .st.running { background: var(--red); color: var(--black); }
 html[data-theme="bauhaus"] .st.done { background: var(--green); color: var(--black); }
 html[data-theme="bauhaus"] .st.failed, html[data-theme="bauhaus"] .st.stopped { background: var(--black); color: var(--white); }
-html[data-theme="bauhaus"] .st.interrupted { background: var(--grey-warm); color: var(--black); }
+html[data-theme="bauhaus"] .st.interrupted, html[data-theme="bauhaus"] .st.queued { background: var(--grey-warm); color: var(--black); }
 html[data-theme="bauhaus"] .runlog-head { border-bottom: var(--rule); }
 html[data-theme="bauhaus"] .run-results { border-bottom: var(--rule); background: var(--white); }
 html[data-theme="bauhaus"] .run-results li { border-top: 1px solid var(--black); }

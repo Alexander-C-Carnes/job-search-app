@@ -159,7 +159,7 @@ const ACTIONS = {
   full: { name: "Full score", calls: "about four Claude calls",
     what: "Rates every requirement in the posting against your impact record and each of your résumés: a 1 to 10 score, a heat map and the gaps to confirm. No résumé is written. Make résumé reuses it." },
   resume: { name: "Make résumé", calls: "about eleven Claude calls",
-    what: "Writes a résumé for this posting: the full score (reused if it has one), three drafts, the best of them merged and checked, a PDF and a fit report. The job moves to In progress, and its badge fills as it goes." },
+    what: "Writes a résumé for this posting: the full score (reused if it has one), three drafts, the best of them merged and checked, a PDF and a fit report. The job moves to In progress, and its badge fills as it goes. When the most runs are going, it waits its turn and starts by itself." },
 };
 const mins = (sec) => `~${Math.max(1, Math.round(sec / 60))} min`;
 function actionTime(kind) {
@@ -205,14 +205,21 @@ $$("[data-help]").forEach((b) => { b.prepend(icon("info")); b.addEventListener("
 // ---- summary ------------------------------------------------------------------------------
 // Résumé tailoring runs' progress, by job (progress.py estimates it): their fit badges become rings that fill
 // (ringTile), with the step and time left under the title, moved on every second between polls by tickRuns.
+// A Make résumé waiting for a free slot (queued) shows an empty dashed ring and its place in line.
 const RUNP = { jobs: new Map(), done: new Set(), timer: null };
+const tailoredJob = (r) => (r.args?.[0] === "tailor" ? r.args[1] : null);
+const placeInLine = (n) => (n === 1 ? "next in line" : `${n}${["", "st", "nd", "rd"][n] || "th"} in line`);
 const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 function trackRunProgress(going) {
   const was = RUNP.jobs;
-  RUNP.jobs = new Map(going.filter((r) => r.progress).map((r) => [r.progress.job, { ...r.progress, got: Date.now() }]));
-  const changed = [...new Set([...was.keys(), ...RUNP.jobs.keys()])].filter((id) => was.has(id) !== RUNP.jobs.has(id));
+  RUNP.jobs = new Map([
+    ...going.filter((r) => r.status === "queued" && tailoredJob(r)).map((r) => [tailoredJob(r), { queued: r.queue_position || 1 }]),
+    ...going.filter((r) => r.progress).map((r) => [r.progress.job, { ...r.progress, got: Date.now() }])]);
+  const isQueued = (m, id) => (m.has(id) ? !!m.get(id).queued : null);
+  // started, finished, or a queued one starting (its dashed ring becomes a filling one)
+  const changed = [...new Set([...was.keys(), ...RUNP.jobs.keys()])].filter((id) => isQueued(was, id) !== isQueued(RUNP.jobs, id));
   for (const id of changed) {
-    if (!RUNP.jobs.has(id)) { RUNP.done.add(id); setTimeout(() => RUNP.done.delete(id), 4000); }   // finished: its badge springs back
+    if (!RUNP.jobs.has(id) && was.get(id) && !was.get(id).queued) { RUNP.done.add(id); setTimeout(() => RUNP.done.delete(id), 4000); }   // finished: its badge springs back
     const j = S.byId.get(id);
     if (!j) continue;
     j._el = j._card = null;
@@ -230,6 +237,14 @@ const timeLeft = (s) => (s < 60 ? "under a minute" : `~${Math.round(s / 60)} min
 function paintRing(el) {
   const p = RUNP.jobs.get(el.dataset.job);
   if (!p) return;
+  el.classList.toggle("queued", !!p.queued);
+  if (p.queued) {
+    $(".arc", el).setAttribute("stroke-dasharray", "0 100");
+    $(".ring-t", el).textContent = p.queued === 1 ? "next" : `#${p.queued}`;
+    el.setAttribute("aria-valuenow", "0");
+    el.title = `Make résumé is waiting its turn (${placeInLine(p.queued)}): the most runs are going. It starts by itself when one finishes.`;
+    return;
+  }
   const { f, left } = runNow(p);
   $(".arc", el).setAttribute("stroke-dasharray", `${(f * 100).toFixed(2)} 100`);
   $(".tip", el).style.transform = `rotate(${(f * 360).toFixed(1)}deg)`;
@@ -241,6 +256,12 @@ function paintRing(el) {
 function paintRunStep(el) {
   const p = RUNP.jobs.get(el.dataset.job);
   if (!p) return;
+  el.classList.toggle("queued", !!p.queued);
+  if (p.queued) {
+    el.replaceChildren(h("span", { class: "dot", "aria-hidden": "true" }), h("b", {}, "Waiting its turn"),
+      h("span", { class: "eta", title: "Starts by itself when one of the runs going finishes" }, `· ${placeInLine(p.queued)}`));
+    return;
+  }
   const { left } = runNow(p);
   el.replaceChildren(h("span", { class: "dot", "aria-hidden": "true" }), h("b", {}, p.step),
     h("span", { class: "eta" + (p.slow ? " slow" : ""), title: p.slow ? "This step is taking longer than usual" : null }, `· ${timeLeft(left)} left`));
@@ -249,7 +270,7 @@ function tickRuns() {
   $$(".run-ring[data-job]").forEach(paintRing);
   $$(".run-step[data-job]").forEach(paintRunStep);
   const eta = $("#run-indicator .run-eta");
-  if (eta) { const p = RUNP.jobs.get(eta.dataset.job); if (p) eta.textContent = ` · ${timeLeft(runNow(p).left)} left`; }
+  if (eta) { const p = RUNP.jobs.get(eta.dataset.job); if (p && !p.queued) eta.textContent = ` · ${timeLeft(runNow(p).left)} left`; }
 }
 const ringTile = (j, cls) => {
   const el = h("div", { class: `fit run-ring ${cls}`, "data-job": j.id, "data-cls": cls, role: "progressbar", "aria-label": "Make résumé progress",
@@ -278,11 +299,13 @@ async function loadSummary() {
   const ind = $("#run-indicator");
   const going = S.summary.active_runs;
   trackRunProgress(going);
+  const live = going.filter((r) => r.status !== "queued"), waiting = going.length - live.length;
   ind.classList.toggle("hidden", !going.length);
   if (going.length) {
-    ind.replaceChildren(spinner(), " ", going.length === 1 ? going[0].label : `${going.length} runs`,
-      ...(going.length === 1 && going[0].progress ? [h("span", { class: "run-eta", "data-job": going[0].progress.job })] : []));
-    ind.title = going.map((r) => r.label).join("\n");
+    ind.replaceChildren(spinner(), " ", live.length === 1 ? live[0].label : `${live.length} runs`,
+      ...(live.length === 1 && live[0].progress && !waiting ? [h("span", { class: "run-eta", "data-job": live[0].progress.job })] : []),
+      ...(waiting ? [h("span", { class: "run-wait" }, ` · ${waiting} waiting`)] : []));
+    ind.title = going.map((r) => (r.status === "queued" ? `Waiting: ${r.label}` : r.label)).join("\n");
     ind.onclick = () => { showTab("runs"); selectRun(going[0].id); };
   }
   // A run this page wasn't following (started before a reload, or beside the one shown) just ended: pick up what it wrote.
@@ -2220,7 +2243,7 @@ async function startRun(body) {
   catch (e) { toast(e.message, true); }
 }
 function runStarted(r) {
-  toast(`Started: ${r.label}`);
+  toast(r.status === "queued" ? `Waiting its turn: ${r.label}. It starts by itself when a run finishes.` : `Started: ${r.label}`);
   pollRun.live = r.id;
   showTab("runs");
   selectRun(r.id);
@@ -2251,6 +2274,9 @@ async function pollRun() {
     if (id !== S.runId) return;
     $("#runlog-title").textContent = `${r.label} · ${r.status}`;
     const log = $("#runlog");
+    const WAIT = "Waiting its turn: the most runs are going. This starts by itself when one finishes.\n";
+    if (r.status === "queued") log.textContent = WAIT;
+    else if (log.textContent === WAIT) log.textContent = "";
     if (r.lines.length) {
       const pinned = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
       log.append(r.lines.join("\n") + "\n");
@@ -2258,9 +2284,10 @@ async function pollRun() {
       if (pinned) log.scrollTop = log.scrollHeight;
     }
     renderRunResults(r);
-    $("#stop-run").classList.toggle("hidden", r.status !== "running");
+    const going = r.status === "running" || r.status === "queued";
+    $("#stop-run").classList.toggle("hidden", !going);
     $("#stop-run").onclick = () => post(`/api/runs/${id}/stop`).then(pollRun);
-    if (r.status === "running") {
+    if (going) {
       pollRun.live = id;
       pollRun._t = setTimeout(pollRun, document.hidden ? 5000 : 1500);
     } else if (pollRun.live === id) {   // it finished while we watched: pick up what it wrote
@@ -2277,9 +2304,10 @@ async function pollRun() {
 // of a tailored job's fit report; a scored job's gaps are beside its posting.
 function renderRunResults(r) {
   const box = $("#run-results");
-  const res = r && r.status !== "running" ? r.results || [] : [];
-  box.classList.toggle("hidden", !r || r.status === "running");
-  if (!r || r.status === "running") { box.replaceChildren(); return; }
+  const busy = !r || r.status === "running" || r.status === "queued";
+  const res = busy ? [] : r.results || [];
+  box.classList.toggle("hidden", busy);
+  if (busy) { box.replaceChildren(); return; }
   if (!res.length) {
     box.replaceChildren(h("p", { class: "muted" }, r.status === "done" ? "This run didn't score any jobs or make any résumés."
       : r.status === "interrupted" ? "The app was closed while this run was going, so it stopped and its results weren't collected."

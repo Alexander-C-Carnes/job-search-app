@@ -15,7 +15,7 @@ from jobpipe import config, render
 from jobpipe.llm import AgentResult
 from jobpipe.notion import NotionTracker
 from jobpipe.store import Store
-from jobpipe.web.runs import Run, RunManager
+from jobpipe.web.runs import Busy, Run, RunManager
 from jobpipe.web.server import create_app
 from conftest import BASE, TITLE, FakeNotion, FakeRunner, _resume, make_job, notion_row
 
@@ -1022,13 +1022,48 @@ def test_runs_side_by_side(env):
     assert {x["id"] for x in c.get("/api/summary", headers=H).json()["active_runs"]} == {search.json()["id"], tailor.json()["id"]}
 
     runs.max_runs = 2
-    r = start(kind="tailor", job_id="j1")
-    assert r.status_code == 409 and "the most at once" in r.json()["detail"]
+    with pytest.raises(Busy, match="the most at once"):              # at the limit, a run that doesn't queue is refused
+        runs.start("Startup refresh", ["startups", "refresh"])
     for x in (search, tailor):
         c.post(f"/api/runs/{x.json()['id']}/stop", headers=H)
         runs.wait(x.json()["id"])
     assert start(kind="preflight", search_ids=["tpm-remote"]).status_code == 200
     c.post(f"/api/runs/{max(runs.runs)}/stop", headers=H)
+
+
+def test_make_resume_waits_its_turn(env):
+    c, runs = env["client"], env["runs"]
+    runs.runs.clear()
+    runs.max_runs = 1
+    runs.argv_prefix = [sys.executable, "-c", "import time; time.sleep(30)"]
+    start = lambda **body: c.post("/api/runs", headers=H, json=body)
+    first = start(kind="tailor", job_id="j1").json()
+    second = start(kind="tailor", job_id="j2")                       # the most are going: it waits, not refused
+    assert second.status_code == 200 and second.json()["status"] == "queued"
+    second = second.json()
+    r = start(kind="tailor", job_id="j2")                            # still one run per job, waiting or not
+    assert r.status_code == 409 and "already being made" in r.json()["detail"]
+    status = {j["id"]: j["status"] for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    assert status["j2"] == "In progress"
+    going = c.get("/api/summary", headers=H).json()["active_runs"]
+    assert [(x["id"], x["status"], x["queue_position"]) for x in going] == [
+        (first["id"], "running", None), (second["id"], "queued", 1)]
+    assert c.get(f"/api/runs/{second['id']}", headers=H).json()["results"] == []
+
+    c.post(f"/api/runs/{first['id']}/stop", headers=H)               # a slot frees: the queued run starts
+    runs.wait(first["id"])
+    for _ in range(100):                                              # the slot frees just after wait() returns
+        if runs.runs[second["id"]].status == "running":
+            break
+        threading.Event().wait(0.02)
+    assert runs.runs[second["id"]].status == "running" and runs.runs[second["id"]].marks["j1"]
+    third = start(kind="tailor", job_id="j1").json()
+    assert third["status"] == "queued"
+    stopped = c.post(f"/api/runs/{third['id']}/stop", headers=H).json()   # stopping a waiting run drops it
+    assert stopped["status"] == "stopped" and not runs.waiting
+    c.post(f"/api/runs/{second['id']}/stop", headers=H)
+    runs.wait(second["id"])
+    assert runs.runs[third["id"]].proc is None                        # it never started
 
 
 def test_a_tailoring_run_puts_its_job_in_progress_at_once(env):

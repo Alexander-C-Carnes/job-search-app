@@ -322,7 +322,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
                             "period": cfg.allowance_period, "per_run": cfg.max_credits_per_run},
                 "backend": cfg.backend, "backend_label": BACKEND_LABELS.get(cfg.backend, cfg.backend),
                 "notion": local.notion is not None,
-                "statuses": list(STATUSES), "active_runs": [{**r.public(len(r.lines)), "progress": progress.of(r)} for r in runs.running()],
+                "statuses": list(STATUSES), "active_runs": [{**r.public(len(r.lines)), "progress": progress.of(r),
+                                 "queue_position": runs.queue_position(r)} for r in (*runs.running(), *runs.waiting)],
                 "scoring": scorer.public(), "startups": startups_summary(), "durations": progress.durations()}
 
     @app.get("/api/jobs")
@@ -992,7 +993,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         if run.results is not None:
             return run.results
         # An interrupted run's changes can't be told apart from later ones, so it lists none.
-        if run.status in ("running", "interrupted") or run.marks is None:
+        if run.status in ("running", "interrupted", "queued") or run.marks is None or callable(run.marks):
             return []
         before, state = run.marks, store.state()
         out = []
@@ -1069,7 +1070,9 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         else:
             raise HTTPException(400, "Unknown run kind")
         try:
-            run = runs.start(label, args, marks=marks_now(), key=key, busy=busy)
+            # Make résumé waits its turn when the most runs are going; the rest are refused then.
+            queue = kind in ("tailor", "tailor-pasted")
+            run = runs.start(label, args, marks=marks_now if queue else marks_now(), key=key, busy=busy, queue=queue)
         except Busy as e:
             raise HTTPException(409, str(e)) from None
         if kind in ("tailor", "tailor-pasted"):
