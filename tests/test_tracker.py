@@ -216,3 +216,29 @@ def test_a_tracker_from_before_the_applied_day_is_backfilled(tmp_path):
     con.close()
     t = LocalTracker(db)
     assert {r["page_id"]: r["applied_on"] for r in t.rows()} == {"a": "2026-09-20", "b": ""}
+
+
+def test_two_processes_syncing_at_once_make_one_notion_page(tmp_path):
+    # The app's background sync and a run's own process (scoring startup roles) each open tracker.db. Both used
+    # to send the same queued job at once; each found no page by its URL and made one, so it was in Notion twice.
+    import threading
+    import time
+    fake = FakeNotion()
+
+    def slow(request):           # Notion takes a moment to answer, so the two syncs overlap
+        time.sleep(0.05)
+        return fake(request)
+
+    def tracker():
+        notion = NotionTracker("ds", "proj", token="t", client=httpx.Client(transport=httpx.MockTransport(slow)))
+        notion.backoff = (0, 0)
+        return LocalTracker(tmp_path / "tracker.db", notion=notion)
+    app, run = tracker(), tracker()
+    run.track(entry(), job_id="j1")
+    threads = [threading.Thread(target=t.sync) for t in (app, run)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert len(fake.rows) == 1
+    assert [(r["job_id"], r["notion_page_id"]) for r in app.rows()] == [("j1", "page1")]

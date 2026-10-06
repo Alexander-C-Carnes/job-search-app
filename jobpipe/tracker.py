@@ -22,13 +22,18 @@ import secrets
 import sqlite3
 import threading
 import time
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from .notion import APPLIED_STATUSES, STATUSES, NotionTracker, TrackerEntry, merge_notes
 from .store import canonical_url, now_iso
+
+try:
+    import fcntl
+except ImportError:      # Windows: only the thread lock, which covers one process
+    fcntl = None
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tracker (
@@ -236,7 +241,7 @@ class LocalTracker:
         """Send the queue, then read Notion's rows. Raises what Notion raises; the queue is kept."""
         if self.notion is None:
             return
-        with self._sync_lock:
+        with self._syncing():
             try:
                 self._push()
                 self._pull()
@@ -246,6 +251,16 @@ class LocalTracker:
                 raise
             with closing(self._db()) as con, con:
                 self._set_meta(con, error="", synced=time.time(), tried=time.time())
+
+    @contextmanager
+    def _syncing(self):
+        """One sync at a time, across processes too: the app and a run's own process (scoring startup roles,
+        tailoring) each open tracker.db, and two syncs sending the same queued job at once each found no page
+        for it in Notion and made one, so the job was there twice."""
+        with self._sync_lock, open(self.path.with_name(self.path.name + ".sync-lock"), "a") as f:
+            if fcntl is not None:
+                fcntl.flock(f, fcntl.LOCK_EX)      # let go when the file closes
+            yield
 
     def _push(self) -> None:
         with closing(self._db()) as con:
