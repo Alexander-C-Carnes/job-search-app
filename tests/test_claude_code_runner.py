@@ -96,6 +96,21 @@ def test_retry_then_error_and_failures(tmp_path):
             asyncio.run(ClaudeCodeRunner(claude_bin=b).run(call()))
 
 
+def test_verbose_setting_prints_a_message_list(tmp_path):
+    """With "verbose": true in Claude Code's settings, --output-format json prints every message, result last."""
+    msgs = [{"type": "system", "subtype": "init"}, {"type": "assistant", "message": {}}, result(OK)]
+    bin_, _ = fake_claude(tmp_path, [msgs])
+    runner = ClaudeCodeRunner(claude_bin=bin_)
+    res = asyncio.run(runner.run(call()))
+    assert res.files["ratings.json"] == '{"a": 1}\n' and runner.usage_log[0]["output"] == 9
+
+    d = tmp_path / "none"
+    d.mkdir()
+    b, _ = fake_claude(d, [[{"type": "system", "subtype": "init"}]])
+    with pytest.raises(AgentError, match="without a result"):
+        asyncio.run(ClaudeCodeRunner(claude_bin=b).run(call()))
+
+
 def test_default_backend_is_claude_code(tmp_path):
     cfg = config.load()
     assert cfg.backend == "claude-code"

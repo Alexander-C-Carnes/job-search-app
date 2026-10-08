@@ -1,6 +1,7 @@
 import json
 
 import httpx
+import pytest
 
 from jobpipe.jd import build_jd, detect_ats, posting_key, read_posting
 from jobpipe.llm import candidate_materials, parse_output, validate
@@ -181,6 +182,8 @@ def test_signal_score_is_computed_from_the_rated_requirements():
     assert Triage.from_json(json.dumps(base)).fit_score == 7          # older answers without rows still load
     capped = Triage.from_json(json.dumps({**base, "score_cap": 4, "requirements": rows(["strong"] * 8)}))
     assert capped.fit_score == 4 and capped.score_cap == 4
+    with pytest.raises(ValueError, match="JSON object"):                # an array is a bad answer, not a crash
+        Triage.from_json(json.dumps([base]))
 
 
 def test_posting_text_is_read_from_structured_data_and_ats_apis():

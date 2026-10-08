@@ -234,6 +234,11 @@ class ClaudeCodeRunner(_RetryingRunner):
         except json.JSONDecodeError:   # crashed before answering: stdout is empty or not the JSON result
             raise AgentError(f"{call.label}: {self.bin} exited {proc.returncode} without a result: "
                              f"{error_line(err.decode() or out.decode())}") from None
+        if isinstance(data, list):   # "verbose": true in the user's Claude Code settings prints every message
+            data = next((m for m in reversed(data) if isinstance(m, dict) and m.get("type") == "result"), None)
+        if not isinstance(data, dict):
+            raise AgentError(f"{call.label}: {self.bin} exited {proc.returncode} without a result: "
+                             f"{error_line(err.decode() or out.decode())}")
         u = data.get("usage") or {}
         usage = {"label": call.label, "model": call.model.model, "stop_reason": data.get("stop_reason"),
                  "input": u.get("input_tokens", 0), "output": u.get("output_tokens", 0),

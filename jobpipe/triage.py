@@ -111,6 +111,8 @@ class Triage:
     @classmethod
     def from_json(cls, text: str) -> "Triage":
         d = json.loads(text)
+        if not isinstance(d, dict):
+            raise ValueError(f"expected a JSON object, got {type(d).__name__}")
         reqs = [r for r in d.get("requirements") or [] if isinstance(r, dict)]
         cov = coverage(reqs)
         cap = d.get("score_cap")
