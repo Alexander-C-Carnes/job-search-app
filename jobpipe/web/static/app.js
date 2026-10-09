@@ -16,10 +16,18 @@ const TOKEN = (() => {
 })();
 
 async function request(path, opts = {}) {
-  const res = await fetch(path, {
-    ...opts,
-    headers: { "X-Jobpipe-Token": TOKEN, ...(opts.body ? { "Content-Type": "application/json" } : {}), ...(opts.headers || {}) },
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      ...opts,
+      headers: { "X-Jobpipe-Token": TOKEN, ...(opts.body ? { "Content-Type": "application/json" } : {}), ...(opts.headers || {}) },
+    });
+  } catch (e) {
+    if (!(e instanceof TypeError)) throw e;
+    // The server isn't answering: say so in words, not the browser's "Failed to fetch". Still a TypeError for the checks below.
+    $("#offline").classList.remove("hidden");
+    throw new TypeError("Can't reach the app's server. Start it with jobsearch run.");
+  }
   if (res.status === 401) { $("#auth-error").classList.remove("hidden"); throw new Error("Not authorized"); }
   return res;
 }
@@ -289,10 +297,13 @@ async function loadSummary() {
   const was = S.summary?.active_runs || [];
   try {
     S.summary = await api("/api/summary");
-    $("#offline").classList.add("hidden");
   } catch (e) {
-    if (e instanceof TypeError) $("#offline").classList.remove("hidden");   // fetch couldn't connect
-    return;
+    return;                                   // can't connect: request() has shown the banner
+  }
+  const off = $("#offline");
+  if (!off.classList.contains("hidden")) {   // back after an outage: reload what failed while it was down
+    off.classList.add("hidden");
+    loadJobs().then(() => { if (S.selected && !S.details.has(S.selected) && S.byId.get(S.selected)?.local) loadDetail(S.selected); });
   }
   applyScoring(S.summary.scoring);
   const c = S.summary.credits;
@@ -1169,7 +1180,10 @@ async function loadDetail(id) {
     S.details.set(id, { d, sig });
     if (S.selected === id && (!old || old.sig !== sig)) renderDetail();
   } catch (e) {
-    if (S.selected === id && !S.details.has(id)) $("#job-detail").append(h("div", { class: "pad muted" }, e.message));
+    if (S.selected !== id || S.details.has(id)) return;
+    // Server down: keep "Loading…", the banner says why, and the panel loads once it's back.
+    if (e instanceof TypeError) $("#job-detail > .pad.muted")?.replaceChildren(spinner(), " Waiting for the app's server…");
+    else $("#job-detail").append(h("div", { class: "pad muted" }, e.message));
   }
 }
 
