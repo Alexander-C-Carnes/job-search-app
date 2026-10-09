@@ -256,17 +256,40 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     startups = StartupStore(store.root / "startups.json")
     board = JobBoard(store, sync, marks, scores_from_run, sent, startups)
 
-    def cached_file(request: Request, path: Path, media_type: str, filename: Optional[str] = None) -> Response:
+    def cached_file(request: Request, path: Path, media_type: str, filename: Optional[str] = None,
+                    retitle: bool = False) -> Response:
         """A file the browser may keep but must revalidate, so an unchanged PDF isn't sent again.
-        `filename` is what the PDF viewer's download button saves it as (else the URL's last part)."""
+        `filename` is what the PDF viewer's download button saves it as (else the URL's last part). The viewer
+        prefers the PDF's own Title, so `retitle` sets that to the same name."""
         st = path.stat()
-        headers = {"ETag": f'"{st.st_mtime_ns:x}-{st.st_size:x}"', "Cache-Control": "private, no-cache"}
+        tag = f"{st.st_mtime_ns:x}-{st.st_size:x}"
+        if retitle and filename:     # a renamed role changes the title inside the PDF
+            tag += "-" + hashlib.sha1(filename.encode()).hexdigest()[:8]
+        headers = {"ETag": f'"{tag}"', "Cache-Control": "private, no-cache"}
         if request.headers.get("if-none-match") == headers["ETag"]:
             return Response(status_code=304, headers=headers)
         if filename:
             plain = re.sub(r'[^ -~]|["\\]', "_", filename)
             headers["Content-Disposition"] = f'inline; filename="{plain}"; filename*=UTF-8\'\'{quote(filename)}'
+            if retitle:
+                data = titled_pdf(path, filename.removesuffix(".pdf"))
+                if data is not None:
+                    return Response(data, media_type=media_type, headers=headers)
         return FileResponse(path, media_type=media_type, headers=headers)
+
+    def titled_pdf(path: Path, title: str) -> Optional[bytes]:
+        """The PDF with its Title set to `title`; None if it can't be read as a PDF."""
+        from io import BytesIO
+
+        from pypdf import PdfWriter
+        try:
+            w = PdfWriter(clone_from=path)
+            w.add_metadata({"/Title": title})
+            buf = BytesIO()
+            w.write(buf)
+            return buf.getvalue()
+        except Exception:  # noqa: BLE001 - not a PDF pypdf can read; serve it as it is
+            return None
 
     def resume_filename(row: Optional[dict]) -> str:
         """The résumé's download name: "<Name> - <Role Title> Resume.pdf"."""
@@ -801,7 +824,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             raise HTTPException(400, "Bad version")
         try:
             return cached_file(request, workspace(jid).pdf_path(which), "application/pdf",
-                               resume_filename(board.row(jid)))
+                               resume_filename(board.row(jid)), retitle=True)
         except EditError as e:
             raise HTTPException(404, str(e)) from None
 

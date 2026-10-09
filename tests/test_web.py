@@ -1,4 +1,5 @@
 """The local web app: auth, job board + Notion, résumé edit loop, searches, runs, notes."""
+import io
 import json
 import re
 import shutil
@@ -11,6 +12,7 @@ from urllib.parse import quote
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from pypdf import PdfReader
 
 from jobpipe import config, render
 from jobpipe.llm import AgentResult
@@ -431,6 +433,7 @@ def test_static_and_pdf_caching(env):
     title = c.get("/api/jobs/j1", headers=H).json()["title"]
     name = f"{config.candidate().name} - {title} Resume.pdf"
     assert r.headers["content-disposition"] == f'inline; filename="{name}"; filename*=UTF-8\'\'{quote(name)}'  # not "1.pdf"
+    assert PdfReader(io.BytesIO(r.content)).metadata.title == name[:-4]  # the PDF viewer saves under this, not "<Name> Resume"
     assert c.get("/api/jobs/j1/resume/1.pdf", headers={**H, "If-None-Match": r.headers["etag"]}).status_code == 304
     assert c.get("/api/summary", headers=H).headers["cache-control"] == "no-store"
 
