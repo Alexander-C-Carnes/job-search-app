@@ -237,7 +237,6 @@ html[data-theme="sorbet"] .band { font-family: var(--display); font-weight: 600;
 html[data-theme="sorbet"] .pdfbar { background: var(--panel-2); }
 html[data-theme="sorbet"] .pdfpane iframe { background: #E9DEE8; }
 html[data-theme="sorbet"] .diff { border-radius: 12px; }
-html[data-theme="sorbet"] .history .v { font-family: var(--display); }
 
 /* the stage path and the résumé meters */
 html[data-theme="sorbet"] .path-line { max-width: 760px; }
@@ -408,3 +407,45 @@ html[data-theme="sorbet"] #actions-help .gl-meta { font: 600 11.5px var(--displa
 html[data-theme="sorbet"] #actions-help[open] { animation: sorbet-rise 620ms var(--open); }
 @keyframes sorbet-rise { from { transform: scale(.92); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { html[data-theme="sorbet"] #actions-help[open] { animation: none; } }
+
+/* Scores across versions and Compare: candy tags, Fredoka numbers, the picked A and B dots spring in on --open */
+html[data-theme="sorbet"] .trend-since b, html[data-theme="sorbet"] .cmp-tile .v { font: 600 16px var(--display); }
+html[data-theme="sorbet"] .trend-since b { font-size: 15px; }
+html[data-theme="sorbet"] .trend-plot .axis text { font-weight: 600; }
+html[data-theme="sorbet"] .trend-plot .range { fill: var(--sel); }
+html[data-theme="sorbet"] .trend-plot .line { stroke-width: 3; }
+html[data-theme="sorbet"] .trend-plot .dot.b { fill: var(--accent); }
+html[data-theme="sorbet"] .trend-plot .ab.a { stroke-width: 2; }
+html[data-theme="sorbet"] .trend-plot .ab.b { fill: var(--accent); }
+html[data-theme="sorbet"] .trend-plot .ab-t { font: 600 12.5px var(--display); }
+html[data-theme="sorbet"] .trend-plot .ab-t.b { fill: #fff; }
+html[data-theme="sorbet"] .trend-plot .hit:hover, html[data-theme="sorbet"] .trend-plot .hit:focus-visible { fill: color-mix(in srgb, var(--accent) 8%, transparent); }
+html[data-theme="sorbet"] .trend-row .rs { width: 30px; height: 30px; font: 700 13px var(--display); }
+html[data-theme="sorbet"] .trend-row .rs.b { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
+html[data-theme="sorbet"] .trend-x span b { font: 600 12.5px var(--display); }
+html[data-theme="sorbet"] .trend-x span.on b { text-decoration: none; color: var(--link); }
+html[data-theme="sorbet"] .delta { font: 700 11.5px/18px var(--display); padding: 0 6px; }
+html[data-theme="sorbet"] .delta.same { background: #F6ECF3; }
+html[data-theme="sorbet"] .vtag { font: 700 12.5px/20px var(--display); border-radius: 8px; padding: 0 7px; }
+html[data-theme="sorbet"] .vtag.a { box-shadow: inset 0 0 0 2px var(--ink); }
+html[data-theme="sorbet"] .vtag.b { background: var(--accent); color: #fff; }
+html[data-theme="sorbet"] .cmp-head h3 { font-size: 17px; }
+html[data-theme="sorbet"] .cmp-tile { background: var(--paper); border: 0; border-radius: 14px; padding: 7px 10px; }
+html[data-theme="sorbet"] .cmp-tile .v small { font: 600 12px var(--body); }
+html[data-theme="sorbet"] .cmp-sub b { font: 600 15px var(--display); }
+html[data-theme="sorbet"] .compare .rt { font: 700 11.5px/18px var(--display); border-radius: 6px; }
+html[data-theme="sorbet"] .compare .rt.missing { background: var(--del-bg); color: var(--del-ink); }
+html[data-theme="sorbet"] .compare .rt.partial { background: #FFF0C7; color: #7A4300; }
+html[data-theme="sorbet"] .compare .rt.strong { background: var(--add-bg); color: var(--add-ink); }
+html[data-theme="sorbet"] .cmp-kw .kw { font-weight: 700; line-height: 21px; padding: 0 9px; }
+html[data-theme="sorbet"] .side-pdfs { background: var(--line); gap: 2px; }
+html[data-theme="sorbet"] .side-col { background: #E9DEE8; }
+html[data-theme="sorbet"] .side-cap { font: 600 13px var(--display); background: var(--panel-2); }
+html[data-theme="sorbet"] .side-cap .muted { font: 700 12px var(--body); }
+@media (prefers-reduced-motion: no-preference) {
+  html[data-theme="sorbet"] .trend-plot :is(.dot.a, .dot.b) { transform-box: fill-box; transform-origin: center; animation: sorbet-pop 930ms var(--open); }
+  html[data-theme="sorbet"] .trend-row :is(.rs.a, .rs.b) { animation: sorbet-rs-pop 930ms var(--open); }
+  html[data-theme="sorbet"] .cmp-tile { transition: transform 620ms var(--open); }
+  html[data-theme="sorbet"] .cmp-tile:hover { transform: translateY(-2px); }
+}
+@keyframes sorbet-rs-pop { from { transform: translateX(-50%) scale(.55); } to { transform: translateX(-50%) scale(1); } }

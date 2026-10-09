@@ -115,7 +115,7 @@ const prefs = (() => {
   try { return JSON.parse(localStorage.getItem("jobpipe-ui") || "{}"); } catch (_) { return {}; }
 })();
 function savePrefs() {
-  try { localStorage.setItem("jobpipe-ui", JSON.stringify({ view: S.view, sort: S.sort, group: S.group, collapsed: [...S.collapsed], docViews: S.docViews, dashRange: S.dashRange, fold: S.fold })); }
+  try { localStorage.setItem("jobpipe-ui", JSON.stringify({ view: S.view, sort: S.sort, group: S.group, collapsed: [...S.collapsed], docViews: S.docViews, dashRange: S.dashRange, fold: S.fold, trend: S.trend })); }
   catch (_) { /* optional */ }
 }
 const S = { jobs: [], byId: new Map(), etag: null, notion: false, syncing: false, notionError: "",
@@ -129,6 +129,7 @@ const S = { jobs: [], byId: new Map(), etag: null, notion: false, syncing: false
             selected: null, drawer: false, detailTab: "resume", detailTabJob: null, details: new Map(), scoring: new Map(), scoreErrors: new Map(), scoreFinished: null, picks: new Set(),
             summary: null, searches: [], defaults: {}, picked: null, runId: null, runSince: 0, tab: "tracker",
             dashRange: ["14", "30", "all"].includes(prefs.dashRange) ? prefs.dashRange : "30",
+            trend: ["ats", "keywords", "skills", "experience"].includes(prefs.trend) ? prefs.trend : "ats",
             docViews: Object.fromEntries(["impact", "prep"].map((k) => {
               const v = prefs.docViews?.[k] ?? (k === "impact" ? prefs.impactView : null);   // impactView: before Interview prep
               return [k, ["formatted", "edit", "split"].includes(v) ? v : "formatted"];
@@ -1681,12 +1682,14 @@ function renderResume(d, panel) {
   const versionSel = h("select", {}, ...r.versions.slice().reverse().map((v) =>
     h("option", { value: v.n, selected: v.n === r.current }, `v${v.n}${v.n === r.current ? " (current)" : ""}`)));
   const frame = h("iframe", { src: fileUrl(`/api/jobs/${id}/resume/${r.current}.pdf`), title: "Résumé PDF" });
-  versionSel.addEventListener("change", () => { frame.src = fileUrl(`/api/jobs/${id}/resume/${versionSel.value}.pdf`); });
+  versionSel.addEventListener("change", () => { pdf.single(); frame.src = fileUrl(`/api/jobs/${id}/resume/${versionSel.value}.pdf`); });
   const pdfLink = h("a", { href: fileUrl(`/api/jobs/${id}/resume/${r.current}.pdf`), target: "_blank" }, "Open PDF ↗");
   const editBtn = h("button", { class: "ghost small", title: "Change the wording yourself, right on the page" }, "Edit on page");
   const fmtNote = formatNote(d, r, (text, fmt) => { instr.value = chat.draft = text; send(fmt); });
-  const pdfpane = h("div", { class: "pdfpane" }, h("div", { class: "pdfbar" }, "Version", versionSel, pdfLink, h("span", { class: "grow" }), editBtn), fmtNote, frame);
-  editBtn.addEventListener("click", () => openPageEditor(d, pdfpane));
+  const pdfbar = h("div", { class: "pdfbar" }, "Version", versionSel, pdfLink, h("span", { class: "grow" }), editBtn);
+  const pdfpane = h("div", { class: "pdfpane" }, pdfbar, fmtNote, frame);
+  const pdf = sideBySide(d, r, pdfpane);
+  editBtn.addEventListener("click", () => { pdf.single(); openPageEditor(d, pdfpane); });
 
   const editpane = h("div", { class: "editpane" });
   const cur = r.versions.find((v) => v.n === r.current);
@@ -1710,17 +1713,10 @@ function renderResume(d, panel) {
     h("div", { class: "metrics" },
       h("span", {}, "Keywords ", h("b", {}, pct(cur?.keywords_pct))),
       h("span", {}, "Format check ", checkBadge(cur?.check))));
-  const hist = h("div", { class: "card" }, h("h3", {}, "History"), h("ul", { class: "history" },
-    ...r.versions.slice().reverse().map((v) => h("li", {},
-      h("span", { class: "v" }, `v${v.n}`),
-      h("span", { class: "what" }, v.instruction ? `“${v.instruction}”` : v.source === "pipeline" ? "From the pipeline" : v.changes || v.source),
-      v.n === r.current ? h("span", { class: "cur" }, "current")
-        : h("button", { class: "ghost small", onclick: async () => {
-            try { await post(`/api/jobs/${id}/restore`, { n: v.n }); toast(`Restored v${v.n} as a new version.`); reloadResume(d.id); }
-            catch (e) { toast(e.message, true); } } }, "Restore")))));
+  const ask = (text) => { if (r.editable === false) return; instr.value = chat.draft = text; instr.focus(); };
   const readOnly = r.editable === false && h("div", { class: "card" }, h("h3", {}, "Chat with Claude isn't available"),
     h("p", { class: "muted" }, "This résumé was saved without its posting and match brief, which Claude needs to check edits against. Use Make résumé in the app to get a copy Claude can edit. You can still change the wording yourself: Edit on page, above the PDF."));
-  editpane.append(readOnly || askCard, proposalBox, metrics, hist);
+  editpane.append(readOnly || askCard, proposalBox, metrics, ...versionCards(d, r, pdf, ask));
   panel.append(h("div", { class: "resume" }, pdfpane, editpane));
 
   const starters = ["What's the weakest part of this résumé for this role?", "What would a recruiter question here?",
@@ -1744,6 +1740,7 @@ function renderResume(d, panel) {
     if (chat.busy && !chat.sending) watchChat(d.id);    // sent from before a reload, or from another window
   };
   const showProposal = (p) => {
+    pdf.single();
     renderProposal(d, p, proposalBox, frame, cur);
     proposalBox.scrollIntoView({ block: "start" });
   };
@@ -1786,7 +1783,7 @@ function renderResume(d, panel) {
     try { chat.msgs = (await post(`/api/jobs/${id}/chat/clear`)).chat; paint(); }
     catch (e) { toast(e.message, true); }
   });
-  if (r.proposal) api(`/api/jobs/${id}/edit`).then((res) => res.proposal && renderProposal(d, res.proposal, proposalBox, frame, cur));
+  if (r.proposal) api(`/api/jobs/${id}/edit`).then((res) => { if (res.proposal) { pdf.single(); renderProposal(d, res.proposal, proposalBox, frame, cur); } });
   paint();
 }
 
@@ -1958,6 +1955,282 @@ function scoreMeters(j, cur) {
   return h("div", { class: "meters" }, ...rows.map(([label, v, max, unit, band]) => h("div", { class: `meter ${band(v)}` },
     h("span", { class: "lbl" }, label), h("span", { class: "val" }, Math.round(v), h("small", {}, unit)),
     h("span", { class: "track" }, h("i", { style: `width:${Math.max(2, Math.min(100, (v / max) * 100))}%` })))));
+}
+// ---- scores across versions -------------------------------------------------------------------
+// Every version keeps the scores it was rated with. A chart draws one of them across the versions with the
+// résumé score under it; clicking a version compares it (A) with another (B: the current one until you pick),
+// as five score tiles, the requirements whose rating moved, the keywords gained and lost, and the two PDFs
+// side by side. No AI call: the scores are stored, and the comparison is worked out from the two files.
+const TREND = [["ats", "ATS", (v) => v.ats], ["keywords", "Keywords", (v) => v.keywords_pct],
+               ["skills", "Skills", (v) => v.ats_parts?.skills], ["experience", "Experience", (v) => v.ats_parts?.experience]];
+const ATS_TARGET = 80;
+const COMPARE = new Map();     // job id -> {a, b, side}: kept while the panel is redrawn
+function versionWhat(v) {
+  if (v.instruction) return `“${v.instruction}”`;
+  return v.source === "pipeline" ? "From Make résumé" : v.changes || v.source || "";
+}
+function versionShort(v) {
+  if (v.source === "pipeline") return "Make résumé";
+  if (v.source?.startsWith("restored")) return `Restored ${v.source.slice(9)}`;
+  if (v.source === "by hand") return /^Edited as text/.test(v.changes || "") ? "Edited as text" : "Edit on page";
+  const t = v.instruction || v.changes || "";
+  return t.length > 24 ? `${t.slice(0, 23).trimEnd()}…` : t;
+}
+// The change from `was` to `now`: ▲ / ▼ with the amount (whole points for a %, tenths for a /10 score).
+function deltaChip(now, was, pctUnit) {
+  if (now == null || was == null) return null;
+  const step = pctUnit ? 1 : 10, dv = Math.round((now - was) * step) / step;
+  return h("span", { class: `delta ${dv > 0 ? "up" : dv < 0 ? "down" : "same"}` }, dv > 0 ? `▲${dv}` : dv < 0 ? `▼${-dv}` : "±0");
+}
+function compareState(jid, r) {
+  const ns = r.versions.map((v) => v.n);
+  const c = COMPARE.get(jid) || { side: false };
+  if (!ns.includes(c.b)) c.b = r.current;
+  if (!ns.includes(c.a) || c.a === c.b) c.a = ns[Math.max(0, ns.indexOf(c.b) - 1)];
+  if (c.a === c.b) c.a = ns.find((n) => n !== c.b);
+  COMPARE.set(jid, c);
+  return c;
+}
+
+// The PDF pane shows version A beside version B while side by side is on; everything else (a proposal,
+// another version picked, Edit on page) puts the one PDF back first.
+function sideBySide(d, r, pane) {
+  const id = encodeURIComponent(d.id);
+  const c = () => compareState(d.id, r);
+  const col = (tag, n) => {
+    const v = r.versions.find((x) => x.n === n);
+    return h("div", { class: "side-col" },
+      h("div", { class: "side-cap" }, h("span", { class: `vtag ${tag.toLowerCase()}` }, `${tag} · v${n}`), " ", versionShort(v),
+        h("span", { class: "muted" }, ` · ${v.resume_score ?? "–"}/10 · ${pct(v.ats)}`)),
+      h("iframe", { src: fileUrl(`/api/jobs/${id}/resume/${n}.pdf`), title: `Résumé v${n}` }));
+  };
+  let saved = null;            // the pane's own children while the two PDFs are up
+  const show = () => {
+    const s = c();
+    if (!s.side) { if (saved) pane.replaceChildren(...saved); saved = null; return; }
+    saved = saved || [...pane.childNodes];
+    const one = h("button", { class: "ghost small" }, "One at a time");
+    one.addEventListener("click", () => { s.side = false; show(); self.changed?.(); });
+    pane.replaceChildren(h("div", { class: "pdfbar" }, h("b", {}, `v${s.a} beside v${s.b}`), h("span", { class: "grow" }), one),
+      h("div", { class: "side-pdfs" }, col("A", s.a), col("B", s.b)));
+  };
+  if (c().side) show();
+  const self = {
+    show,
+    single: () => { if (c().side) { c().side = false; show(); self.changed?.(); } },
+    changed: null,         // set by the Compare card, whose Side by side button follows
+  };
+  return self;
+}
+
+function versionCards(d, r, pdf, ask) {
+  if (r.versions.length < 2) {
+    const v = r.versions[0];
+    return [h("div", { class: "card" }, h("h3", {}, "Versions"),
+      h("p", { class: "muted" }, `v${v.n}: ${versionWhat(v)}. Every edit you accept or make adds a version with its own scores, and you can compare any two here.`))];
+  }
+  const id = encodeURIComponent(d.id);
+  const st = compareState(d.id, r);
+  const byN = new Map(r.versions.map((v) => [v.n, v]));
+  const metric = () => TREND.find(([k]) => k === S.trend) || TREND[0];
+  const plot = h("div", { class: "trend-plot" });
+  const seg = h("div", { class: "seg", role: "group", "aria-label": "Score to chart" });
+  const paintSeg = () => seg.replaceChildren(...TREND.map(([k, label]) => h("button", {
+    class: metric()[0] === k ? "active" : "", "aria-pressed": String(metric()[0] === k),
+    onclick: () => { S.trend = k; savePrefs(); paintSeg(); drawTrend(plot, r, metric(), st, pick); } }, label)));
+  paintSeg();
+  const since = h("div", { class: "trend-since" });
+  const first = r.versions[0], cur = byN.get(r.current);
+  since.append(h("span", { class: "muted" }, `Since v${first.n}`),
+    h("span", {}, "Résumé ", h("b", {}, `${first.resume_score ?? "–"} → ${cur.resume_score ?? "–"}`), " ", deltaChip(cur.resume_score, first.resume_score)),
+    h("span", {}, "ATS ", h("b", {}, `${pct(first.ats)} → ${pct(cur.ats)}`), " ", deltaChip(cur.ats, first.ats, true)));
+  const trendCard = h("div", { class: "card trend" },
+    h("div", { class: "card-head" }, h("h3", {}, "Scores across versions"), seg),
+    since,
+    h("p", { class: "muted trend-hint" }, `Click a version to compare it with v${st.b}. Pick any two in Compare below.`),
+    plot);
+  const cmp = h("div", { class: "card compare" });
+  function pick(n) {
+    if (n === st.b) return;
+    st.a = n;
+    drawTrend(plot, r, metric(), st, pick);
+    paintCompare();
+  }
+  new ResizeObserver(() => drawTrend(plot, r, metric(), st, pick)).observe(plot);
+  setTimeout(() => plot.childElementCount || drawTrend(plot, r, metric(), st, pick));   // the observer waits for a paint
+
+  const options = (sel) => r.versions.slice().reverse().map((v) =>
+    h("option", { value: v.n, selected: v.n === sel }, `v${v.n} · ${versionShort(v)}${v.n === r.current ? " (current)" : ""}`));
+  let loading = 0;
+  async function paintCompare() {
+    const A = byN.get(st.a), B = byN.get(st.b);
+    const selA = h("select", { "aria-label": "Version A" }, ...options(st.a));
+    const selB = h("select", { "aria-label": "Version B" }, ...options(st.b));
+    const choose = () => {
+      const a = +selA.value, b = +selB.value;
+      if (a === b) { toast("Pick two different versions."); paintCompare(); return; }
+      st.a = a; st.b = b;
+      drawTrend(plot, r, metric(), st, pick);
+      paintCompare();
+      if (st.side) pdf.show();
+    };
+    selA.addEventListener("change", choose);
+    selB.addEventListener("change", choose);
+    const swap = h("button", { class: "ghost small", title: "Swap A and B", "aria-label": "Swap A and B" }, "⇄");
+    swap.addEventListener("click", () => { [st.a, st.b] = [st.b, st.a]; drawTrend(plot, r, metric(), st, pick); paintCompare(); if (st.side) pdf.show(); });
+    const side = h("button", { class: `${st.side ? "primary" : "ghost"} small side-btn`, "aria-pressed": String(!!st.side) }, "Side by side");
+    side.addEventListener("click", () => { st.side = !st.side; pdf.show(); pdf.changed(); });
+    const restore = A.n !== r.current && h("button", { class: "ghost small", onclick: async () => {
+      try { await post(`/api/jobs/${id}/restore`, { n: A.n }); toast(`Restored v${A.n} as a new version.`); reloadResume(d.id); }
+      catch (e) { toast(e.message, true); } } }, `Restore v${A.n}`);
+    const askBtn = r.editable !== false && h("button", { class: "ghost small", onclick: () =>
+      ask(`What changed between v${A.n} and v${B.n}, and why did the scores move?`) }, "Ask Claude about it");
+    const tile = (label, a, b, isPct) => h("div", { class: "cmp-tile" }, h("span", { class: "k" }, label),
+      h("span", { class: "v" }, `${a == null ? "–" : Math.round(a * (isPct ? 1 : 10)) / (isPct ? 1 : 10)} → ${b == null ? "–" : Math.round(b * (isPct ? 1 : 10)) / (isPct ? 1 : 10)}`,
+        h("small", {}, isPct ? "%" : "/10")),
+      h("span", {}, deltaChip(b, a, isPct)));
+    const moved = h("div", { class: "cmp-moved" }, h("p", { class: "muted" }, spinner(), " Comparing…"));
+    cmp.replaceChildren(
+      h("div", { class: "cmp-head" }, h("h3", {}, "Compare"), h("span", { class: "cmp-pick" }, h("span", { class: "vtag a" }, "A"), selA), swap,
+        h("span", { class: "cmp-pick" }, h("span", { class: "vtag b" }, "B"), selB)),
+      h("div", { class: "cmp-tiles" },
+        tile("Résumé", A.resume_score, B.resume_score, false), tile("ATS", A.ats, B.ats, true),
+        tile("Skills", A.ats_parts?.skills, B.ats_parts?.skills, true), tile("Experience", A.ats_parts?.experience, B.ats_parts?.experience, true),
+        tile("Keywords", A.keywords_pct, B.keywords_pct, true)),
+      moved,
+      h("div", { class: "cmp-actions" }, side, restore, askBtn));
+    const ticket = ++loading;
+    try {
+      const res = await api(`/api/jobs/${id}/resume/compare?a=${A.n}&b=${B.n}`);
+      if (ticket !== loading) return;
+      moved.replaceChildren(...compareDetail(res, A, B));
+    } catch (e) { if (ticket === loading) moved.replaceChildren(h("p", { class: "muted" }, e.message)); }
+  }
+  pdf.changed = () => {         // the PDF pane went back to one PDF (or here, side by side was turned on or off)
+    const b = cmp.querySelector(".side-btn");
+    if (!b) return;
+    b.setAttribute("aria-pressed", String(!!st.side));
+    b.className = `${st.side ? "primary" : "ghost"} small side-btn`;
+  };
+  paintCompare();
+  return [trendCard, cmp];
+}
+
+function compareDetail(res, A, B) {
+  const rank = { missing: 0, partial: 1, strong: 2 };
+  const up = res.moved.filter((m) => (rank[m.b] ?? 0) > (rank[m.a] ?? 0)).length;
+  const out = [h("div", { class: "cmp-sub" }, h("b", {}, "What moved the score"),
+    h("span", { class: "muted" }, res.moved.length ? `${up} up · ${res.moved.length - up} down` : ""))];
+  if (!A.ratings || !B.ratings) out.push(h("p", { class: "muted" }, "One of these versions was saved before requirement ratings were kept, so only its scores compare."));
+  else if (!res.moved.length) out.push(h("p", { class: "muted" }, "No requirement changed its rating."));
+  out.push(...res.moved.map((m) => h("div", { class: "mv" },
+    h("span", { class: "kind" }, m.section === "skills" ? "Skill" : "Exp."),
+    h("span", { class: "req", title: `${m.requirement} (${m.weight})` }, m.requirement),
+    h("span", { class: `rt ${m.a}` }, m.a), h("span", { class: "arrow", "aria-hidden": "true" }, "→"), h("span", { class: `rt ${m.b}` }, m.b),
+    h("span", { class: `delta ${(rank[m.b] ?? 0) > (rank[m.a] ?? 0) ? "up" : "down"}`, "aria-label": (rank[m.b] ?? 0) > (rank[m.a] ?? 0) ? "up" : "down" },
+      (rank[m.b] ?? 0) > (rank[m.a] ?? 0) ? "▲" : "▼"))));
+  const kw = res.keywords;
+  if (kw && (kw.gained.length || kw.lost.length)) {
+    out.push(h("div", { class: "cmp-kw" }, h("span", { class: "muted" }, "Keywords"),
+      ...kw.gained.map((k) => h("span", { class: "kw plus" }, `+ ${k}`)),
+      ...kw.lost.map((k) => h("span", { class: "kw minus", title: `In v${A.n}, not in v${B.n}` }, `− ${k}`))));
+  }
+  const changed = res.diff.filter((o) => o.op !== "same").length;
+  out.push(h("details", { class: "cmp-diff" }, h("summary", {}, `Wording changes (${plural(changed, "line")})`), renderDiff(res.diff)));
+  return out;
+}
+
+// The chart: one score per version, a line through them, A and B tagged; the résumé score in a row under it.
+function drawTrend(box, r, [key, label, get], st, pick) {
+  if (!box.isConnected) return;
+  const svg = (tag, attrs = {}) => {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    return el;
+  };
+  const vs = r.versions, n = vs.length;
+  const W = Math.max(260, box.clientWidth || 560), H = 150;
+  const L = 44, R = 30, T = 30, B = 12, P = 18;        // P: the first and last points sit in from the plot's edges
+  const pw = W - L - R, ph = H - T - B, y0 = T + ph;
+  const vals = vs.map(get);
+  const have = vals.filter((v) => v != null);
+  const target = key === "ats" ? ATS_TARGET : null;
+  const lo = Math.max(0, Math.floor((Math.min(...have, target ?? 100) - 4) / 10) * 10);
+  const hi = Math.min(100, Math.ceil((Math.max(...have, target ?? 0) + 4) / 10) * 10);
+  const y = (v) => y0 - ((v - lo) / Math.max(1, hi - lo)) * ph;
+  const x = (i) => L + P + (n === 1 ? (pw - 2 * P) / 2 : ((pw - 2 * P) * i) / (n - 1));
+  const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img",
+    "aria-label": `${label} by version: ${vs.map((v, i) => `v${v.n} ${vals[i] == null ? "not scored" : pct(vals[i])}`).join(", ")}. Comparing v${st.a} with v${st.b}.` });
+  const ia = vs.findIndex((v) => v.n === st.a), ib = vs.findIndex((v) => v.n === st.b);
+  const band = svg("rect", { class: "range", x: Math.min(x(ia), x(ib)), y: T - 18, width: Math.abs(x(ib) - x(ia)), height: ph + 18, rx: 6 });
+  const grid = svg("g", { class: "grid" }), axis = svg("g", { class: "axis" }), marks = svg("g"), hits = svg("g");
+  for (let v = lo; v <= hi; v += 10) {
+    if ((v - lo) % (hi - lo > 30 ? 20 : 10)) continue;
+    grid.append(svg("line", { x1: L, x2: W - R + 20, y1: y(v), y2: y(v) }));
+    const t = svg("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end" });
+    t.textContent = `${v}%`;
+    axis.append(t);
+  }
+  if (target != null) {
+    grid.append(svg("line", { class: "target", x1: L, x2: W - R + 20, y1: y(target), y2: y(target) }));
+    const t = svg("text", { class: "target-l", x: W - R + 20, y: y(target) + 14, "text-anchor": "end" });
+    t.textContent = `target ${target}%`;
+    axis.append(t);
+  }
+  let d = "";
+  vals.forEach((v, i) => { if (v != null) d += `${d && vals[i - 1] != null ? "L" : "M"}${x(i)},${y(v)}`; });
+  marks.append(svg("path", { class: "line", d }));
+  const tags = [];
+  vals.forEach((v, i) => {
+    if (v == null) return;
+    const role = i === ia ? "a" : i === ib ? "b" : "";
+    marks.append(svg("circle", { class: `dot ${role}`, cx: x(i), cy: y(v), r: role ? 7 : 4.5 }));
+    if (role) tags.push([role, i, v]);
+  });
+  for (const [role, i, v] of tags) {          // the A and B tags sit above their dots, inside the chart
+    const text = `${role.toUpperCase()} · ${Math.round(v)}%`, w = 58;
+    const cx = Math.min(Math.max(x(i), L + w / 2), W - w / 2 - 2), ty = Math.max(2, y(v) - 30);
+    marks.append(svg("rect", { class: `ab ${role}`, x: cx - w / 2, y: ty, width: w, height: 20, rx: 7 }));
+    const t = svg("text", { class: `ab-t ${role}`, x: cx, y: ty + 14, "text-anchor": "middle" });
+    t.textContent = text;
+    marks.append(t);
+  }
+  const tip = h("div", { class: "dash-tip trend-tip hidden", role: "status" });
+  const slot = n > 1 ? (pw - 2 * P) / (n - 1) : pw;
+  vs.forEach((v, i) => {
+    const hit = svg("rect", { class: "hit", x: x(i) - slot / 2, y: 0, width: slot, height: H, tabindex: "0",
+      "aria-label": `v${v.n}, ${versionShort(v)}: ${label} ${pct(vals[i])}, résumé ${v.resume_score ?? "–"}/10.${v.n === st.b ? "" : ` Compare with v${st.b}.`}` });
+    const prev = vs[i - 1];
+    const show = () => {
+      tip.replaceChildren(h("div", { class: "tv" }, `v${v.n}`, h("span", { class: "td" }, ` · ${versionWhat(v)}`)),
+        h("div", {}, `${label} `, h("b", {}, pct(vals[i])), " ", prev ? deltaChip(vals[i], vals[i - 1], true) : null,
+          " · Résumé ", h("b", {}, v.resume_score ?? "–"), "/10 ", prev ? deltaChip(v.resume_score, prev.resume_score) : null),
+        v.n === st.b ? null : h("div", { class: "td" }, `Click to compare with v${st.b}`));
+      tip.classList.remove("hidden");
+      const k = box.clientWidth / W, tw = tip.offsetWidth, py = (vals[i] == null ? y0 : y(vals[i])) * k;
+      const above = py - tip.offsetHeight - 14;      // over the point, else under it
+      tip.style.left = `${Math.min(Math.max(0, x(i) * k - tw / 2), box.clientWidth - tw)}px`;
+      tip.style.top = `${above >= 0 ? above : py + 14}px`;
+    };
+    const hide = () => tip.classList.add("hidden");
+    hit.addEventListener("pointerenter", show);
+    hit.addEventListener("focus", show);
+    hit.addEventListener("pointerleave", hide);
+    hit.addEventListener("blur", hide);
+    hit.addEventListener("click", () => pick(v.n));
+    hit.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(v.n); } });
+    hits.append(hit);
+  });
+  root.append(band, grid, axis, marks, hits);
+  // The résumé score for each version, and its name, under its point.
+  const every = Math.max(1, Math.ceil(n / Math.max(1, Math.floor(W / 72))));
+  const rs = h("div", { class: "trend-row", "aria-hidden": "true" }, h("span", { class: "lbl" }, "Résumé"),
+    ...vs.map((v, i) => h("span", { class: `rs ${fitClass(v.resume_score)} ${i === ia ? "a" : i === ib ? "b" : ""}`,
+      style: `left:${(x(i) / W) * 100}%` }, v.resume_score ?? "–")));
+  const xl = h("div", { class: "trend-x", "aria-hidden": "true" }, ...vs.map((v, i) =>
+    (n - 1 - i) % every && i !== ia && i !== ib ? null : h("span", { class: i === ia || i === ib ? "on" : "", style: `left:${(x(i) / W) * 100}%;width:${Math.max(44, Math.min(110, slot * every - 6))}px` },
+      h("b", {}, `v${v.n}${v.n === r.current ? " · current" : ""}`), n <= 6 ? versionShort(v) : "")));
+  box.replaceChildren(root, rs, xl, tip);
 }
 function checkBadge(check) {
   if (!check || check.passed == null) return h("b", {}, "n/a");

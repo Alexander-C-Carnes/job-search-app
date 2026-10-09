@@ -515,6 +515,39 @@ def test_edit_is_rerated_and_its_scores_become_the_jobs(env):
     assert (job()["ats_total"], job()["resume_score"]) == (75.5, 8)
 
 
+def test_compare_two_versions_lists_what_moved(env):
+    c, runner = env["client"], env["runner"]
+    _ratings(env["run_dir"])
+    rerate = AgentResult(files={"ratings.json": json.dumps(
+        {"skills": ["strong", "strong"], "experience": ["strong"], "score": 9})}, summary="")
+    pipeline_run = runner.pipeline.run
+
+    async def run(call):
+        return rerate if call.label == "resume-rerate" else await pipeline_run(call)
+    runner.pipeline.run = run
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Lead with reliability"})
+    c.post("/api/jobs/j1/edit/accept", headers=H)
+
+    res = c.get("/api/jobs/j1/resume/compare?a=1&b=2", headers=H).json()
+    # raised ratings first, the heavier requirement first
+    assert [(m["requirement"], m["a"], m["b"]) for m in res["moved"]] == [
+        ("Cross-team launches", "partial", "strong"), ("Reliability", "partial", "strong")]
+    assert res["keywords"] == {"gained": [], "lost": []}
+    assert any(o["op"] != "same" for o in res["diff"])
+    back = c.get("/api/jobs/j1/resume/compare?a=2&b=1", headers=H).json()
+    assert [(m["a"], m["b"]) for m in back["moved"]] == [("strong", "partial"), ("strong", "partial")]
+    assert c.get("/api/jobs/j1/resume/compare?a=1&b=7", headers=H).status_code == 404
+
+
+def test_compare_lists_keywords_gained_and_lost(env):
+    c = env["client"]
+    env["runner"].reply = re.sub(r"(?i)technical program manag\w*", "program lead", _resume())
+    c.post("/api/jobs/j1/edit", headers=H, json={"instruction": "Say program lead"})
+    c.post("/api/jobs/j1/edit/accept", headers=H)
+    assert c.get("/api/jobs/j1/resume/compare?a=1&b=2", headers=H).json()["keywords"] == {"gained": [], "lost": ["TPM"]}
+    assert c.get("/api/jobs/j1/resume/compare?a=2&b=1", headers=H).json()["keywords"] == {"gained": ["TPM"], "lost": []}
+
+
 def test_failed_rerating_keeps_the_edit_and_rescores_keywords_only(env):
     c = env["client"]
     _ratings(env["run_dir"])

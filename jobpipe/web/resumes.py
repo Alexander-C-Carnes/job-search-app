@@ -180,13 +180,40 @@ class ResumeWorkspace:
         obj = self.run_dir / "01-objectives.md"
         return exact_title(obj.read_text(), "") if obj.exists() else ""
 
-    def keyword_pct(self, text: str) -> Optional[float]:
+    def keyword_hits(self, text: str) -> Optional[tuple[set[str], int]]:
+        """The posting keywords the text has, and how many keywords there are (None without keywords.json)."""
         kw_path = self.run_dir / "keywords.json"
         if not kw_path.exists():
             return None
         kw = normalize_keywords(json.loads(kw_path.read_text()))[0]
-        hits = sum(bool(re.search(p, text, re.I)) for p in kw.values())
-        return round(100 * hits / max(1, len(kw)), 1)
+        return {k for k, p in kw.items() if re.search(p, text, re.I)}, len(kw)
+
+    def keyword_pct(self, text: str) -> Optional[float]:
+        if (got := self.keyword_hits(text)) is None:
+            return None
+        hits, total = got
+        return round(100 * len(hits) / max(1, total), 1)
+
+    def compare(self, a: int, b: int) -> dict:
+        """What changed from version a to version b, beside the scores each version keeps: the wording, the
+        requirements whose rating moved (raised first, heaviest first) and the posting keywords gained or lost."""
+        vs = {v["n"]: v for v in self.history()["versions"]}
+        if a not in vs or b not in vs:
+            raise EditError(f"No version {a if a not in vs else b}")
+        md_a, md_b = self.md(a), self.md(b)
+        moved = []
+        if rows := self.requirements():
+            for sec in ("skills", "experience"):
+                ra, rb = ((vs[n].get("ratings") or {}).get(sec) for n in (a, b))
+                if ra and rb and len(ra) == len(rb) == len(rows[sec]):
+                    moved += [{"section": sec, "requirement": r["requirement"], "weight": r["weight"], "a": x, "b": y}
+                              for r, x, y in zip(rows[sec], ra, rb) if x != y]
+        rank, heavy = {"missing": 0, "partial": 1, "strong": 2}, {"high": 0, "med": 1, "medium": 1, "low": 2}
+        moved.sort(key=lambda m: (rank.get(m["b"], 0) < rank.get(m["a"], 0), heavy.get(str(m["weight"]).lower(), 3)))
+        hits_a, hits_b = self.keyword_hits(md_a), self.keyword_hits(md_b)
+        return {"a": a, "b": b, "diff": diff(md_a, md_b), "moved": moved,
+                "keywords": {"gained": sorted(hits_b[0] - hits_a[0]), "lost": sorted(hits_a[0] - hits_b[0])}
+                if hits_a and hits_b else None}
 
     def requirements(self) -> Optional[dict]:
         """The requirement rows the tailoring run rated (ratings-final.json) with the tailored résumé's

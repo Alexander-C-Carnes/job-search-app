@@ -258,7 +258,6 @@ html[data-theme="transit"] .band { font: 600 16px var(--display); color: var(--m
 html[data-theme="transit"] .pdfbar { background: var(--panel-2); border-bottom: 1.5px solid var(--line); font: 600 14px var(--display); }
 html[data-theme="transit"] .pdfpane iframe { background: var(--line); }
 html[data-theme="transit"] .diff { border: 1.5px solid var(--line); border-radius: 4px; }
-html[data-theme="transit"] .history .v { font: 700 14px/20px var(--display); background: var(--tint); border-radius: 4px; text-align: center; padding: 0 6px; }
 html[data-theme="transit"] .sources th { font: 600 13px var(--display); }
 html[data-theme="transit"] .scorecard .score-head h3 { font: 600 12px var(--display); letter-spacing: .08em; }
 

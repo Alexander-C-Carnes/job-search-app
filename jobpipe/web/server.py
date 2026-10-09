@@ -828,6 +828,14 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         except EditError as e:
             raise HTTPException(404, str(e)) from None
 
+    @app.get("/api/jobs/{jid}/resume/compare")
+    def compare_resumes(jid: str, a: int, b: int):
+        """Version a beside version b: the wording diff, the requirement ratings that moved, keywords gained and lost."""
+        try:
+            return workspace(jid).compare(a, b)
+        except EditError as e:
+            raise HTTPException(404, str(e)) from None
+
     @app.get("/api/jobs/{jid}/resume/{n}.md")
     def resume_md(jid: str, n: int):
         return {"markdown": workspace(jid).md(n)}

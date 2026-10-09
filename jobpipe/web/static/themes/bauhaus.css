@@ -252,11 +252,6 @@ html[data-theme="bauhaus"] .pass { background: var(--green); color: var(--black)
 html[data-theme="bauhaus"] .fail { background: var(--red); color: var(--black); padding: 0 6px; font-weight: 700; }
 html[data-theme="bauhaus"] .diff { border: var(--rule); border-radius: 0; }
 html[data-theme="bauhaus"] .diff .ctx { color: var(--muted); }
-html[data-theme="bauhaus"] .history li { border-bottom: var(--rule); }
-html[data-theme="bauhaus"] .history li:last-child { border-bottom: 0; }
-html[data-theme="bauhaus"] .history .v { font: 400 13px var(--display); }
-html[data-theme="bauhaus"] .history .what { color: var(--muted); }
-html[data-theme="bauhaus"] .history .cur { background: var(--green); color: var(--black); padding: 0 6px; font-weight: 700; }
 html[data-theme="bauhaus"] .outside-bar { border-bottom: var(--rule); background: var(--white); }
 html[data-theme="bauhaus"] .markdown th, html[data-theme="bauhaus"] .markdown td { border: 1px solid var(--black); }
 html[data-theme="bauhaus"] .spinner { border-color: var(--grey); border-top-color: var(--black); }

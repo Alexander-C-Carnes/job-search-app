@@ -267,9 +267,6 @@ html[data-theme="arcade"] .metrics { font-size: 14px; }
 html[data-theme="arcade"] .pass { color: var(--good); } html[data-theme="arcade"] .fail { color: var(--bad); }
 html[data-theme="arcade"] .changes { font-size: 14px; }
 html[data-theme="arcade"] .diff { border: var(--px) solid var(--ink); border-radius: 0; }
-html[data-theme="arcade"] .history li { font-size: 14px; border-bottom: 2px solid var(--line); }
-html[data-theme="arcade"] .history .v { font: 400 10px/1.6 var(--pixel); min-width: 32px; }
-html[data-theme="arcade"] .history .cur { color: var(--good); }
 html[data-theme="arcade"] .markdown table { font-size: 14px; }
 html[data-theme="arcade"] .markdown th, html[data-theme="arcade"] .markdown td { border: 2px solid var(--line); }
 html[data-theme="arcade"] .heatmap { border-top: var(--px) solid var(--ink); }
