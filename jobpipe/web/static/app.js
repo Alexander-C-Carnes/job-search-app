@@ -60,6 +60,7 @@ const ICONS = {
   down: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 7.5L10 12l4.5-4.5"/></svg>',
   left: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.5 5.5L8 10l4.5 4.5"/></svg>',
   right: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 5.5L12 10l-4.5 4.5"/></svg>',
+  resume: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.8h6.6L15.2 6.4v10.8H5z"/><path d="M11.4 2.8v3.8h3.8M7.6 10h4.8M7.6 13h4.8"/></svg>',
   palette: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 0 0 15c1.3 0 1.9-.8 1.9-1.6 0-.9-.6-1.2-.6-2 0-.9.7-1.4 1.6-1.4h1.4c1.8 0 3.2-1.3 3.2-3.1C17.5 5.6 14.1 2.5 10 2.5z"/><circle cx="6.5" cy="9" r="1.1"/><circle cx="9" cy="5.8" r="1.1"/><circle cx="13" cy="6.2" r="1.1"/></svg>',
 };
 function icon(name) {
@@ -195,7 +196,7 @@ function openActionsHelp() {
       row("Résumé", "1–10", "How well the résumé you made covers the posting. Every edit is rated again."),
       row("ATS", "%", "How much of the posting's skills, experience and keywords an applicant tracking system would find in the résumé.")),
     h("h3", {}, "Runs"),
-    h("p", {}, "The Runs tab lists searches and Make résumé, with each one's log. A signal or full score shows on the job instead."),
+    h("p", {}, "The Runs tab lists searches and Make résumé, with each one's log. A signal or full score shows on the job instead. Runs carry on when the app restarts (jobsearch restart); quitting the app stops them, and it asks first."),
     h("div", { class: "actions" }, h("button", { class: "primary", onclick: () => dlg.close() }, "Close")));
   dlg.showModal();
 }
@@ -854,6 +855,31 @@ async function scoreJobs(ids, kind = "signal") {
     if (ids.length > 1) toast(`${kind === "full" ? "Full" : "Signal"} scoring ${plural(ids.length, "job")}.`);
   } catch (e) { toast(e.message, true); }
 }
+// Make résumé for every checked role: the server queues them, the most at once and the rest in turn.
+// Their badges become rings (dashed while waiting), and the bar above the list counts them down.
+async function makeResumes(jobs) {
+  const at = S.summary?.max_runs || 3, each = S.summary?.durations?.make_resume_s;
+  const hours = each && (Math.ceil(jobs.length / at) * each) / 3600;
+  if (jobs.length > 1 && !confirm(`Make ${plural(jobs.length, "résumé")}? Each is ${ACTIONS.resume.calls}. ${at} run at a time and the rest wait their turn` +
+    (hours ? `: ${hours < 1 ? mins(hours * 3600) : `~${hours.toFixed(1)} hours`} in all.` : ".") + " You can stop the waiting ones at any time.")) return;
+  try {
+    const r = await post("/api/runs/resumes", { job_ids: jobs.map((j) => j.id) });
+    S.picks.clear();
+    const going = r.runs.filter((x) => x.status !== "queued").length;
+    toast(!r.runs.length ? "Nothing to start: those résumés are already being made."
+      : `Making ${plural(r.runs.length, "résumé")}: ${going} started${r.runs.length > going ? `, ${r.runs.length - going} waiting their turn` : ""}.` +
+        (r.skipped.length ? ` Skipped ${r.skipped.length} (${[...new Set(r.skipped.map((x) => x.reason))].join(", ")}).` : "") + " Follow them in Runs.");
+    loadSummary();
+    loadJobs();     // each goes In progress as it's queued
+  } catch (e) { toast(e.message, true); }
+}
+async function stopWaitingResumes() {
+  try {
+    const r = await post("/api/runs/resumes/stop-waiting");
+    toast(r.stopped ? `Dropped ${plural(r.stopped, "résumé")} that hadn't started. The ones going will finish.` : "None were waiting.");
+    loadSummary();
+  } catch (e) { toast(e.message, true); }
+}
 function renderBatch() {
   const box = $("#batch");
   const picked = S.visible.filter((j) => S.picks.has(j.id));
@@ -866,8 +892,13 @@ function renderBatch() {
   if (S.scoring.size) parts.push(h("span", { class: "batch-status" }, spinner(), ` Scoring ${plural(S.scoring.size, "job")}`,
     queued ? ` (${queued} waiting)` : "", queued ? h("button", { class: "link-btn", title: "Jobs already being scored will finish",
       onclick: async () => { try { applyScoring(await post("/api/score/cancel")); } catch (e) { toast(e.message, true); } } }, "Stop the rest") : null));
+  const waiting = [...RUNP.jobs.values()].filter((p) => p.queued).length;
+  if (RUNP.jobs.size) parts.push(h("span", { class: "batch-status" }, spinner(), ` Making ${plural(RUNP.jobs.size, "résumé")}`,
+    waiting ? ` (${waiting} waiting)` : "", waiting ? h("button", { class: "link-btn", title: "Résumés already being made will finish",
+      onclick: stopWaitingResumes }, "Stop the rest") : null));
   if (picked.length) {
     const ok = picked.filter(canScore), full = ok.filter((j) => !j.tailored), sig = ok.filter((j) => j.impact_score == null);
+    const make = picked.filter((j) => j.local && !j.tailored && !RUNP.jobs.has(j.id));
     parts.push(h("span", {}, h("b", {}, picked.length), " selected"),
       ...(S.scope === "find" ? [h("button", { class: "primary small", title: "Adds them to your tracker as Not started. You stay here.",
         onclick: () => trackJobs(picked.map((j) => j.id)) }, "Track")] : []),
@@ -875,6 +906,9 @@ function renderBatch() {
         onclick: () => scoreJobs(sig.map((j) => j.id), "signal") }, "Signal score"),
       h("button", { class: "ghost small", disabled: !full.length, title: `${ACTIONS.full.what} ${actionTime("full")} each, one at a time.`,
         onclick: () => scoreJobs(full.map((j) => j.id), "full") }, "Full score"),
+      h("button", { class: "ghost small", disabled: !make.length,
+        title: `${ACTIONS.resume.what} ${actionTime("resume")} each, ${S.summary?.max_runs || 3} at a time; the rest wait their turn. Roles with a résumé, one being made, or no posting stored are skipped.`,
+        onclick: () => makeResumes(make) }, make.length && make.length < picked.length ? `Make résumé (${make.length})` : "Make résumé"),
       h("button", { class: "link-btn", onclick: () => { S.picks.clear(); renderJobs(); } }, "Clear"));
   } else {
     const todo = S.visible.filter((j) => score(j) == null && canScore(j) && !S.scoring.has(j.id));
@@ -902,6 +936,11 @@ function starButton(j, label = false) {
     title: j.starred ? "Remove star" : "Star this role",
     onclick: (e) => { e.stopPropagation(); toggleStar(j, e.currentTarget); } }, icon("star"), label ? (j.starred ? "Starred" : "Star") : null);
 }
+// A role with a résumé made for it: a page icon beside the star that opens its Résumé tab.
+const resumeMark = (j) => j.tailored && h("button", { class: "resume-mark", "aria-label": `Open the résumé made for ${j.title}`,
+  title: `Résumé made${j.ats_total != null ? ` · ATS ${pct(j.ats_total)}` : ""}${j.resume_score != null ? ` · résumé ${j.resume_score}/10` : ""}. Open it.`,
+  onclick: (e) => { e.stopPropagation(); S.detailTab = "resume"; S.detailTabJob = j.id; selectJob(j.id, true); } }, icon("resume"));
+const rowEnd = (j) => h("div", { class: "row-end" }, starButton(j), resumeMark(j));
 const fitTile = (j, cls = "") => RUNP.jobs.has(j.id) ? ringTile(j, cls) : h("div", {
   class: `fit ${fitClass(score(j))} ${j.impact_score != null ? "full" : ""} ${RUNP.done.has(j.id) ? "pop" : ""} ${cls}`, "data-job": j.id, "data-cls": cls,
   onanimationend: (e) => e.currentTarget.classList.remove("pop"),   // springs once, not each time the list is redrawn
@@ -939,7 +978,7 @@ function rowEl(j) {
           j.closed ? h("span", { class: "tag warn-tag", title: `Its posting had closed when the app checked on ${fmtDate(j.closed)}` }, "Closed")
             : j.dismissed && h("span", { class: "tag" }, "Dismissed"),
           !j.local && h("span", { class: "tag", title: "None of your filters found it. Paste its description on the role, or a signal score reads it from its page." }, "No posting stored"))),
-      starButton(j));
+      rowEnd(j));
   }
   j._el.classList.toggle("selected", j.id === S.selected);
   j._el.firstChild.checked = S.picks.has(j.id);
@@ -986,7 +1025,7 @@ function cardEl(j) {
           j.tailored && h("span", { class: "tag ok" }, `Résumé${j.ats_total != null ? " " + pct(j.ats_total) : ""}`),
           noSentTag(j),
           referralTag(j))),
-      starButton(j));
+      rowEnd(j));
   }
   j._card.classList.toggle("selected", j.id === S.selected);
   return j._card;

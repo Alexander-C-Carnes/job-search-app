@@ -15,6 +15,8 @@ import os
 import re
 import secrets
 import shutil
+import signal
+import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -337,6 +339,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
                 "notion": local.notion is not None,
                 "statuses": list(STATUSES), "active_runs": [{**r.public(len(r.lines)), "progress": progress.of(r),
                                  "queue_position": runs.queue_position(r)} for r in (*runs.running(), *runs.waiting)],
+                "max_runs": runs.max_runs,
                 "scoring": scorer.public(), "startups": startups_summary(), "durations": progress.durations()}
 
     @app.get("/api/jobs")
@@ -1028,6 +1031,19 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     def list_runs():
         return {"runs": [r.public(max(0, len(r.lines) - 200)) for r in sorted(runs.runs.values(), key=lambda r: -r.id)]}
 
+    # Runs outlive a restart of the app (runs.py), and the ones waiting their turn wait on: start those now.
+    runs.resume(marks_now)
+
+    @app.get("/api/runs/going")
+    def runs_going():
+        """How many runs are going and waiting: the Mac app asks before quitting, which stops them."""
+        return runs.going()
+
+    @app.post("/api/runs/stop-all")
+    def stop_all_runs():
+        """Stop every run going and drop the waiting ones (`jobsearch restart --force`)."""
+        return {"stopped": runs.stop_all()}
+
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: int, since: int = 0):
         if run_id not in runs.runs:
@@ -1071,33 +1087,68 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             args = ["run", "--no-tailor", *flags] if score else ["search", *flags]
             what = ", ".join(spec["titles"])                 # what ran: the dialog may have changed a saved filter
             label = f"Search once: {what if len(what) <= 70 else what[:67] + '…'}" + (" + signal score" if score else "")
-        elif kind == "tailor":
-            jid = str(body.get("job_id", ""))
-            if not store.job(jid):
-                raise HTTPException(400, "Unknown job")
-            args, label = ["tailor", jid], f"Make résumé: {store.job(jid).get('job_title', jid)}"
-            key, busy = f"tailor:{jid}", "This job's résumé is already being made. Follow it in Runs."
-        elif kind == "tailor-pasted":
-            # Stored first, like Add a job, so the run tailors that job and it shows in Find jobs.
-            jid, _ = store_added({**body, "allow_duplicate": True})
-            job = store.job(jid)
-            args, label = ["tailor", jid], f"Make résumé: {job['job_title']} @ {job['company']}"
-            key = f"tailor:{jid}"
+        elif kind in ("tailor", "tailor-pasted"):
+            if kind == "tailor":
+                jid = str(body.get("job_id", ""))
+                if not store.job(jid):
+                    raise HTTPException(400, "Unknown job")
+                label = f"Make résumé: {store.job(jid).get('job_title', jid)}"
+            else:
+                # Stored first, like Add a job, so the run tailors that job and it shows in Find jobs.
+                jid, _ = store_added({**body, "allow_duplicate": True})
+                job = store.job(jid)
+                label = f"Make résumé: {job['job_title']} @ {job['company']}"
+            try:
+                run = start_resume(jid, label)
+            except Busy as e:
+                raise HTTPException(409, str(e)) from None
+            sync.kick()
+            return run.public(0)
         else:
             raise HTTPException(400, "Unknown run kind")
         try:
-            # Make résumé waits its turn when the most runs are going; the rest are refused then.
-            queue = kind in ("tailor", "tailor-pasted")
-            run = runs.start(label, args, marks=marks_now if queue else marks_now(), key=key, busy=busy, queue=queue)
+            run = runs.start(label, args, marks=marks_now(), key=key, busy=busy)
         except Busy as e:
             raise HTTPException(409, str(e)) from None
-        if kind in ("tailor", "tailor-pasted"):
-            # The board shows the job In progress now; the run does the same when it starts tailoring.
-            from ..pipeline import Candidate, tailoring_entry
-            st = board.state().get(jid) or {}
-            local.start(tailoring_entry(Candidate(store.job(jid), "manual"), st, date.today().isoformat()), job_id=jid)
-            sync.kick()
         return run.public(0)
+
+    def start_resume(jid: str, label: str) -> Run:
+        """Make résumé for a stored job. It waits its turn when the most runs are going (other runs are
+        refused then), and is Busy while that job's résumé is already being made or waiting."""
+        run = runs.start(label, ["tailor", jid], marks=marks_now, key=f"tailor:{jid}",
+                         busy="This job's résumé is already being made. Follow it in Runs.", queue=True)
+        # The board shows the job In progress now; the run does the same when it starts tailoring.
+        from ..pipeline import Candidate, tailoring_entry
+        st = board.state().get(jid) or {}
+        local.start(tailoring_entry(Candidate(store.job(jid), "manual"), st, date.today().isoformat()), job_id=jid)
+        return run
+
+    @app.post("/api/runs/resumes")
+    def make_resumes(body: dict):
+        """Make résumé for each checked job, in the order given: a queue that runs the most at once and
+        starts the next as one finishes. A job with no stored posting, or whose résumé is already being
+        made, is skipped and said why."""
+        made, skipped = [], []
+        for jid in dict.fromkeys(str(x) for x in body.get("job_ids") or []):
+            job = store.job(jid)
+            if not job:
+                skipped.append({"id": jid, "reason": "no posting stored"})
+                continue
+            try:
+                made.append(start_resume(jid, f"Make résumé: {job.get('job_title') or jid}").public(0))
+            except Busy:
+                skipped.append({"id": jid, "reason": "already being made"})
+        if made:
+            sync.kick()
+        return {"runs": made, "skipped": skipped}
+
+    @app.post("/api/runs/resumes/stop-waiting")
+    def stop_waiting_resumes():
+        """Drop the Make résumé runs still waiting their turn. The ones going finish."""
+        waiting = [r for r in list(runs.waiting) if r.args[:1] == ["tailor"]]
+        for r in waiting:
+            runs.stop(r.id)
+        return {"stopped": len(waiting)}
 
     # ---- startups: who just raised, and their open roles ----------------------------------------
     def lookup_keys() -> dict[str, str]:
@@ -1131,6 +1182,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             return None
 
     app.state.auto_refresh = auto_refresh
+    app.state.runs = runs
 
     def startup_public(s: dict) -> dict:
         """A startup as the tab shows it: the stored record plus which of its roles are already jobs here, and
@@ -1714,7 +1766,6 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
 
 
 def serve(cfg: Config, port: int = 8765, open_browser: bool = True) -> None:
-    import uvicorn
     import webbrowser
 
     from ..pipeline import make_tracker
@@ -1728,13 +1779,16 @@ def serve(cfg: Config, port: int = 8765, open_browser: bool = True) -> None:
     print(f"\n  jobpipe is running at {url}\n  (bookmark it; the token stays the same until you delete {config.DATA / 'web-token'})\n")
     if open_browser:
         webbrowser.open(url)
+    runs = app.state.runs
     if "JOBSEARCH_APP_VERSION" in os.environ:
-        # Started by the Mac app (mac/Launcher.swift): stop when it's gone, even if it was force-quit.
+        # Started by the Mac app (mac/Launcher.swift): stop when it's gone, even if it was force-quit. That's
+        # quitting, so the runs stop too (the Mac app asks first when it can).
         parent = os.getppid()
 
         def follow_app() -> None:
             while os.getppid() == parent:
                 threading.Event().wait(2)
+            runs.stop_all()
             os._exit(0)
         threading.Thread(target=follow_app, daemon=True).start()
     if cfg.startups.auto_refresh_hours:
@@ -1750,4 +1804,63 @@ def serve(cfg: Config, port: int = 8765, open_browser: bool = True) -> None:
                     print(f"  Refresh startup sources started on its own (run {run.id}); it runs every "
                           f"{cfg.startups.auto_refresh_hours:g} hours while the app is open.")
         threading.Thread(target=keep_fresh, daemon=True).start()
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    run_server(app, port)
+
+
+def run_server(app: FastAPI, port: int) -> None:
+    """Serve until stopped. Quitting stops the runs; a restart leaves them going (app_server says which is which)."""
+    import uvicorn
+
+    runs = app.state.runs
+    server = app_server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"), runs)
+    signal.signal(signal.SIGHUP, server.hang_up)
+    try:
+        server.run()
+    except KeyboardInterrupt:        # uvicorn passes Ctrl+C on once it has shut down; as uvicorn.run does, end quietly
+        pass
+    finally:
+        if server.quitting:
+            n = runs.stop_all()
+            if n:
+                print(f"  Stopped {n} run{'s' if n != 1 else ''}.", flush=True)
+
+
+def at_terminal() -> bool:
+    try:
+        return bool(sys.stdin) and sys.stdin.isatty()
+    except (ValueError, OSError):    # stdin closed
+        return False
+
+
+def app_server(uvicorn_config, runs: RunManager):
+    """uvicorn's server, which tells apart how it was stopped. Runs outlive the app (runs.py), so:
+    - SIGTERM (`jobsearch restart`, `kill`) restarts: the runs going carry on, and the waiting ones wait on.
+    - SIGINT (Ctrl+C, or quitting the Mac app) and SIGHUP (its terminal window closed) quit: `quitting` is set
+      and serve() stops the runs. At a terminal, Ctrl+C with runs going says so first; a second Ctrl+C quits."""
+    import uvicorn
+
+    class Server(uvicorn.Server):
+        quitting = False
+        warned = 0.0
+
+        def handle_exit(self, sig, frame):
+            going = runs.going()
+            if sig == signal.SIGTERM and not self.quitting and (going["running"] or going["waiting"]):
+                print(f"\n  Stopping the app. {going['text'][0].upper() + going['text'][1:]}: they carry on, "
+                      "and the app picks them up when it starts again.", flush=True)
+            if sig == signal.SIGINT and not self.quitting and not self.should_exit:
+                if (going["running"] or going["waiting"]) and at_terminal() and time.monotonic() - self.warned > 10:
+                    self.warned = time.monotonic()
+                    them = "it" if going["running"] + going["waiting"] == 1 else "them"
+                    print(f"\n  {going['text'][0].upper() + going['text'][1:]}. Quitting stops {them}.\n"
+                          f"  Press Ctrl+C again to quit and stop {them}, or leave it and the app keeps running.\n"
+                          "  (To restart the app without stopping them: jobsearch restart)\n", flush=True)
+                    return
+                self.quitting = True
+            super().handle_exit(sig, frame)
+
+        def hang_up(self, sig, frame):
+            self.quitting = True
+            super().handle_exit(signal.SIGINT, frame)
+
+    return Server(uvicorn_config)

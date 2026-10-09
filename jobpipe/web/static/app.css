@@ -295,6 +295,12 @@ html[data-theme] .fit.run-ring { border: 0; box-shadow: none; background: var(--
 .star[aria-pressed="true"] svg { fill: currentColor; }
 .jobs li .star[aria-pressed="false"], .kcard .star[aria-pressed="false"] { opacity: 0; }
 .jobs li:hover .star, .jobs li:focus-within .star, .kcard:hover .star, .kcard:focus-within .star { opacity: 1; }
+/* The star and, for a role with a résumé made, the page icon under it (it opens the Résumé tab). */
+.row-end { display: flex; flex-direction: column; align-items: center; gap: 2px; align-self: start; }
+.resume-mark { border: 0; background: none; padding: 5px; border-radius: 6px; color: var(--good); display: inline-flex; }
+.resume-mark .ico { width: 16px; height: 16px; }
+.resume-mark .ico svg { fill: color-mix(in srgb, currentColor 14%, transparent); }
+.resume-mark:hover { background: color-mix(in srgb, var(--good) 12%, transparent); }
 .star.labeled { border: 1px solid var(--line); background: var(--panel); padding: 6px 12px 6px 9px; border-radius: 7px; color: var(--ink); }
 .star.labeled .ico { color: var(--faint); }
 .star.labeled[aria-pressed="true"] .ico { color: var(--star); }

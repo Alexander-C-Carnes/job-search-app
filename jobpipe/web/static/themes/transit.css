@@ -220,6 +220,7 @@ html[data-theme="transit"] .col[data-stage="Blocked"] header .n { border-style: 
 html[data-theme="transit"] .col.over { background: var(--panel); outline: 0; box-shadow: inset 0 0 0 3px var(--c); }
 html[data-theme="transit"] .col-empty { color: var(--muted); border: 1.5px dashed var(--line); border-radius: 4px; margin: 2px; }
 html[data-theme="transit"] .kcard { grid-template-columns: 36px minmax(0, 1fr) auto; border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 4px 8px 8px; }
+html[data-theme="transit"] .resume-mark { border-radius: 4px; color: var(--st-applied); }
 html[data-theme="transit"] .kcard:hover { border-color: var(--faint); }
 html[data-theme="transit"] .kcard.selected { border-color: var(--st-done); box-shadow: inset 0 0 0 1px var(--st-done); }
 html[data-theme="transit"] .kcard .t { font-size: 14px; }

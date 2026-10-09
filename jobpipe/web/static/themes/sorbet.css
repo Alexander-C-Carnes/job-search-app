@@ -201,6 +201,14 @@ html[data-theme="sorbet"] .col-empty { border: 2px dashed color-mix(in srgb, var
 html[data-theme="sorbet"] .kcard { border-radius: 14px; padding: 10px 6px 10px 10px; }
 html[data-theme="sorbet"] .kcard:hover { border-color: var(--faint); }
 html[data-theme="sorbet"] .kcard.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+/* a résumé made: a mint scoop under the star that springs when pointed at */
+html[data-theme="sorbet"] .row-end { gap: 4px; }
+html[data-theme="sorbet"] .resume-mark { width: 30px; height: 30px; padding: 0; place-items: center; display: grid; border-radius: 50%;
+  background: color-mix(in srgb, var(--st-applied) 30%, white); color: var(--ink); transition: transform 420ms var(--close), background-color .2s; }
+html[data-theme="sorbet"] .resume-mark .ico svg { fill: var(--panel); stroke-width: 1.7; }
+html[data-theme="sorbet"] .resume-mark:hover { background: var(--st-applied); transform: scale(1.14) rotate(-6deg); transition: transform 700ms var(--open), background-color .2s; }
+html[data-theme="sorbet"] .resume-mark:focus-visible { box-shadow: 0 0 0 3px var(--accent); outline: none; }
+@media (prefers-reduced-motion: reduce) { html[data-theme="sorbet"] .resume-mark:hover { transform: none; } }
 
 /* the detail */
 html[data-theme="sorbet"] .detail { background: var(--paper); }

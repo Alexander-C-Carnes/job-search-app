@@ -8,7 +8,8 @@
 #   jobsearch install   make `jobsearch` work from any folder
 #
 # Extra arguments to run/go/restart go to `jobpipe serve`, e.g. jobsearch run --no-open.
-# restart and go won't stop the app during a run (a search or a tailoring); add --force to.
+# Runs going in the app (a search, Make résumé) carry on through restart and go, and the app picks them up;
+# add --force to stop them too. Quitting the app (Ctrl+C in its window) stops them, after asking.
 # The port is 8765, or $JOBSEARCH_PORT. Your profile (résumés, settings, keys, data) is in ~/JobSearch,
 # or $JOBPIPE_HOME. Written for macOS's bash 3.2, so no bash 4 features.
 set -e
@@ -65,17 +66,27 @@ setup() {     # .venv with the packages in requirements.txt and the PDF browser;
   fi
 }
 
-run_going() {  # a run (search or tailoring) is going in the app, so stopping it would cut that short
+api() {       # api METHOD PATH: ask the app on $PORT (with its token); prints the answer, fails on an error status
   local token=""
   [ -f "$DATA/web-token" ] && token=$(cat "$DATA/web-token")
-  curl -s --max-time 3 -H "X-Jobpipe-Token: $token" "http://127.0.0.1:$PORT/api/runs" 2>/dev/null |
-    grep -q '"status":"running"'
+  curl -sf --max-time 15 -X "$1" -H "X-Jobpipe-Token: $token" "http://127.0.0.1:$PORT$2" 2>/dev/null
+}
+
+run_going() {  # a run (search or tailoring) is going in the app
+  api GET /api/runs | grep -q '"status":"running"'
 }
 
 stop_app() {  # stop the app on $PORT, only if that's this app's server
-  if [ -z "$FORCE" ] && run_going; then
-    say "A run is going in the app (see its Runs tab). Wait for it to finish, or add --force to stop it anyway."
-    exit 1
+  if [ -n "$FORCE" ]; then
+    api POST /api/runs/stop-all >/dev/null && say "Stopped the runs that were going."
+  elif run_going; then
+    if api GET /api/runs/going >/dev/null; then
+      say "Runs are going: they carry on, and the app picks them up when it starts again."
+    else   # an app from before runs outlived it: stopping it would cut them short
+      say "A run is going in the app (see its Runs tab), and this version of the app can't keep it going"
+      say "through a restart. Wait for it to finish, or add --force to stop it anyway."
+      exit 1
+    fi
   fi
   local pids pid stopped=""
   pids=$(lsof -ti "tcp:$PORT" -sTCP:LISTEN 2>/dev/null || true)
@@ -182,7 +193,7 @@ cmd_install() {
 }
 
 usage() {
-  sed -n '2,11p' "$REPO/jobsearch" | sed 's/^# \{0,1\}//'
+  sed -n '2,12p' "$REPO/jobsearch" | sed 's/^# \{0,1\}//'
 }
 
 # --force (restart and go): stop the app even if a run is going. The rest go to `jobpipe serve`.

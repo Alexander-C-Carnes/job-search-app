@@ -1,7 +1,8 @@
 // Job Search.app: starts the bundled web app (Python, in Contents/Resources) and opens it in the browser.
 //
 // The app's files are read-only inside the bundle; everything personal is in the profile folder
-// (~/JobSearch, or $JOBPIPE_HOME), which the server makes on first start. Quitting the app stops the server.
+// (~/JobSearch, or $JOBPIPE_HOME), which the server makes on first start. Quitting the app stops the server,
+// and with it any runs going (a search, Make résumé); it asks first when there are some.
 // Clicking the Dock icon again opens the browser again. On start it checks GitHub for a newer release.
 import AppKit
 import Foundation
@@ -27,6 +28,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ app: NSApplication, hasVisibleWindows: Bool) -> Bool {
         openInBrowser(nil)
         return false
+    }
+
+    // Quitting stops the runs going and drops the waiting ones (the server does, on SIGINT), so say so first.
+    // Only for the server this app started: quitting leaves one started some other way (`jobsearch run`) alone.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let s = server, s.isRunning, let going = runsGoing() else { return .terminateNow }
+        let a = NSAlert()
+        a.alertStyle = .warning
+        a.messageText = going.prefix(1).uppercased() + going.dropFirst()
+        a.informativeText = "Quitting Job Search stops them: résumés being made are cut short, and the ones waiting "
+            + "their turn won't start. To let them finish, keep Job Search open."
+        a.addButton(withTitle: "Quit and Stop Runs")
+        a.addButton(withTitle: "Keep Running")
+        return a.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
+    // "2 runs are going and 1 is waiting their turn", or nil when none are (or the server doesn't answer).
+    func runsGoing() -> String? {
+        guard let u = url, let comps = URLComponents(url: u, resolvingAgainstBaseURL: false),
+              let token = comps.queryItems?.first(where: { $0.name == "token" })?.value,
+              let api = URL(string: "http://127.0.0.1:\(comps.port ?? defaultPort)/api/runs/going") else { return nil }
+        var req = URLRequest(url: api)
+        req.timeoutInterval = 3
+        req.setValue(token, forHTTPHeaderField: "X-Jobpipe-Token")
+        let done = DispatchSemaphore(value: 0)
+        var text: String?
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            if (resp as? HTTPURLResponse)?.statusCode == 200, let data = data,
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               ((obj["running"] as? Int) ?? 0) + ((obj["waiting"] as? Int) ?? 0) > 0 {
+                text = obj["text"] as? String
+            }
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 4)
+        return text
     }
 
     func applicationWillTerminate(_ note: Notification) {

@@ -4,6 +4,7 @@ import re
 import shutil
 import sys
 import threading
+import time
 from datetime import date
 from urllib.parse import quote
 
@@ -800,6 +801,13 @@ def test_run_results_list_the_jobs_it_scored(env):
     assert [x["id"] for x in run.results] == ["j2"]
 
 
+def _until(cond, seconds=10):
+    end = time.monotonic() + seconds
+    while not cond():
+        assert time.monotonic() < end, "timed out"
+        threading.Event().wait(0.05)
+
+
 def test_runs_are_kept_in_the_database(tmp_path):
     db = tmp_path / "tracker.db"
     runs = RunManager(argv_prefix=[sys.executable, "-c", "print('one'); print('two')"], db=db)
@@ -807,20 +815,116 @@ def test_runs_are_kept_in_the_database(tmp_path):
     runs.wait(first.id)
     runs.argv_prefix = [sys.executable, "-c", "import time; print('started'); time.sleep(30)"]
     second = runs.start("second", [])
-    for _ in range(100):
-        if second.lines:
-            break
-        threading.Event().wait(0.05)
+    _until(lambda: second.lines)
 
     reopened = RunManager(argv_prefix=[sys.executable, "-c", "pass"], db=db)   # the app restarted mid-run
-    second.proc.kill()
     a, b = reopened.runs[first.id], reopened.runs[second.id]
     assert (a.label, a.args, a.lines, a.status, a.marks) == ("first", ["a"], ["one", "two"], "done", {"j1": "x"})
     assert a.finished and a.results is None
+    assert all(isinstance(t, float) for t in a.line_at) and len(a.line_at) == 2   # each line keeps when it was printed
+    assert (b.lines, b.status) == (["started"], "running")       # still going: the restart didn't stop it
+    second.proc.kill()                                          # killed outright, it can't say how it ended
+    _until(lambda: b.status != "running")
     assert (b.lines, b.status, b.returncode) == (["started"], "interrupted", None)
     assert reopened.active() is None and reopened.start("third", []).id == second.id + 1
 
-    assert all(isinstance(t, float) for t in a.line_at) and len(a.line_at) == 2   # each line keeps when it was printed
+
+def test_a_run_carries_on_through_a_restart_and_its_end_lands(tmp_path):
+    db = tmp_path / "tracker.db"
+    script = "import time; print('started', flush=True); time.sleep(1.5); print('finished')"
+    old = RunManager(argv_prefix=[sys.executable, "-c", script], db=db)
+    run = old.start("Make résumé: x", ["tailor", "j1"])
+    _until(lambda: run.lines)
+    old_proc = run.proc
+    old.close()                                                 # the app stops; the run's process doesn't
+    new = RunManager(argv_prefix=[sys.executable, "-c", "pass"], db=db)
+    picked = new.runs[run.id]
+    assert picked.status == "running"
+    _until(lambda: picked.status != "running")
+    assert (picked.lines, picked.status, picked.returncode) == (["started", "finished"], "done", 0)
+    assert not old_proc.alive()
+
+
+def test_stopping_a_picked_up_run_checks_it_is_ours(tmp_path, monkeypatch):
+    import jobpipe.web.runs as runs_mod
+    db = tmp_path / "tracker.db"
+    RunManager(argv_prefix=[sys.executable, "-c", "import time; print('x', flush=True); time.sleep(30)"], db=db).start("s", [])
+    new = RunManager(db=db)
+    run = new.runs[1]
+    assert run.status == "running" and run.proc.popen is None
+    # A process that only has the run's pid (macOS reuses them) is never signalled.
+    monkeypatch.setattr(runs_mod, "is_ours", lambda pid, nonce: False)
+    new.stop(1)
+    threading.Event().wait(0.5)
+    assert run.proc.alive()
+    monkeypatch.undo()
+    new.stop(1)                                                 # the real check: it is ours, so it stops
+    _until(lambda: run.status != "running")
+    assert run.status == "stopped" and run.returncode == -15
+
+
+def test_waiting_runs_wait_on_through_a_restart(tmp_path):
+    import sqlite3
+    db = tmp_path / "tracker.db"
+    old = RunManager(argv_prefix=[sys.executable, "-c", "import time; time.sleep(30)"], db=db, max_runs=1)
+    going = old.start("Make résumé: a", ["tailor", "a"], queue=True)
+    waiting = old.start("Make résumé: b", ["tailor", "b"], marks=lambda: {"b": "1"}, key="tailor:b", queue=True)
+    assert waiting.status == "queued"
+    old.close()
+    with sqlite3.connect(db) as con:                            # an edited database can't queue another command
+        con.execute("INSERT INTO runs(id, label, args, started, queued) VALUES (9, 'x', '[\"tailor\", \"--jd-file=/etc/hosts\"]', 'now', 1)")
+    new = RunManager(argv_prefix=[sys.executable, "-c", "print('made')"], db=db, max_runs=1)
+    assert [r.id for r in new.waiting] == [waiting.id] and new.runs[waiting.id].key == "tailor:b"
+    assert new.runs[9].status == "failed" and "Not started" in new.runs[9].lines[-1]
+    with pytest.raises(Busy):                                   # still one run per job
+        new.start("again", ["tailor", "b"], key="tailor:b", queue=True)
+    new.resume(lambda: {"b": "2"})
+    assert new.runs[waiting.id].status == "queued"              # the slot is still taken by the one going
+    new.stop(going.id)                                          # it ends: the waiting one starts
+    _until(lambda: new.runs[waiting.id].status == "done")
+    assert new.runs[waiting.id].lines == ["made"] and new.runs[waiting.id].marks == {"b": "2"}
+
+
+def test_quitting_stops_every_run(tmp_path):
+    db = tmp_path / "tracker.db"
+    runs = RunManager(argv_prefix=[sys.executable, "-c", "import time; print('x', flush=True); time.sleep(30)"], db=db, max_runs=1)
+    a = runs.start("a", ["tailor", "a"], queue=True)
+    b = runs.start("b", ["tailor", "b"], queue=True)
+    assert runs.going() == {"running": 1, "waiting": 1, "text": "1 run is going and 1 is waiting their turn"}
+    assert runs.stop_all() == 2
+    assert (a.status, b.status) == ("stopped", "stopped") and not runs.waiting
+    reopened = RunManager(db=db)                                # and they stay stopped
+    assert [reopened.runs[x.id].status for x in (a, b)] == ["stopped", "stopped"] and not reopened.waiting
+
+
+def test_the_app_says_what_quitting_would_stop_and_restarting_keeps(env, monkeypatch):
+    import signal
+    import uvicorn
+    from jobpipe.web import server as server_mod
+    c, runs = env["client"], env["runs"]
+    runs.runs.clear()
+    runs.argv_prefix = [sys.executable, "-c", "import time; time.sleep(30)"]
+    assert c.get("/api/runs/going", headers=H).json() == {"running": 0, "waiting": 0, "text": ""}
+    c.post("/api/runs", headers=H, json={"kind": "tailor", "job_id": "j1"})
+    assert c.get("/api/runs/going", headers=H).json()["text"] == "1 run is going"
+
+    make = lambda: server_mod.app_server(uvicorn.Config(env["app"]), runs)
+    restart = make()
+    restart.handle_exit(signal.SIGTERM, None)                    # jobsearch restart: the runs carry on
+    assert restart.should_exit and not restart.quitting
+    monkeypatch.setattr(server_mod, "at_terminal", lambda: False)
+    quit_ = make()
+    quit_.handle_exit(signal.SIGINT, None)                       # the Mac app's Quit (it asked already): they stop
+    assert quit_.should_exit and quit_.quitting
+    monkeypatch.setattr(server_mod, "at_terminal", lambda: True)
+    ctrl_c = make()
+    ctrl_c.handle_exit(signal.SIGINT, None)                      # Ctrl+C at a terminal with a run going: it says so first
+    assert not ctrl_c.should_exit
+    ctrl_c.handle_exit(signal.SIGINT, None)                      # and a second one quits
+    assert ctrl_c.should_exit and ctrl_c.quitting
+
+    assert c.post("/api/runs/stop-all", headers=H).json() == {"stopped": 1}
+    assert c.get("/api/runs/going", headers=H).json()["running"] == 0
 
 
 def test_run_lines_get_times_in_an_older_database(tmp_path):
@@ -1065,6 +1169,25 @@ def test_make_resume_waits_its_turn(env):
     c.post(f"/api/runs/{second['id']}/stop", headers=H)
     runs.wait(second["id"])
     assert runs.runs[third["id"]].proc is None                        # it never started
+
+
+def test_make_resume_for_checked_jobs_queues_them(env):
+    c, runs = env["client"], env["runs"]
+    runs.runs.clear()
+    runs.max_runs = 1
+    runs.argv_prefix = [sys.executable, "-c", "import time; time.sleep(30)"]
+    solo = c.post("/api/runs", headers=H, json={"kind": "tailor", "job_id": "j2"}).json()
+    r = c.post("/api/runs/resumes", headers=H, json={"job_ids": ["j1", "j2", "nope", "j1"]}).json()
+    # one run per job, in order; one already going and one with no posting are skipped and said why
+    assert [(x["args"], x["status"]) for x in r["runs"]] == [(["tailor", "j1"], "queued")]
+    assert r["skipped"] == [{"id": "j2", "reason": "already being made"}, {"id": "nope", "reason": "no posting stored"}]
+    status = {j["id"]: j["status"] for j in c.get("/api/jobs", headers=H).json()["jobs"]}
+    assert status["j1"] == status["j2"] == "In progress"
+    # the ones still waiting can be dropped; the one going carries on
+    assert c.post("/api/runs/resumes/stop-waiting", headers=H).json() == {"stopped": 1}
+    assert not runs.waiting and runs.runs[solo["id"]].status == "running"
+    c.post(f"/api/runs/{solo['id']}/stop", headers=H)
+    runs.wait(solo["id"])
 
 
 def test_a_tailoring_run_puts_its_job_in_progress_at_once(env):

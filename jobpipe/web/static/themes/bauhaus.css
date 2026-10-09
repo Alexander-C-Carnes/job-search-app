@@ -181,6 +181,9 @@ html[data-theme="bauhaus"] .tag.round-tag b { color: var(--black); font-weight: 
 html[data-theme="bauhaus"] .ref-chip { border: var(--rule); border-radius: 0; background: var(--white); color: var(--black); }
 html[data-theme="bauhaus"] .star[aria-pressed="true"], html[data-theme="bauhaus"] .star:hover { color: var(--black); }
 html[data-theme="bauhaus"] .star:hover { background: var(--yellow); border-radius: 0; }
+html[data-theme="bauhaus"] .resume-mark { border-radius: 0; color: var(--black); background: var(--green); padding: 4px; }
+html[data-theme="bauhaus"] .resume-mark .ico svg { fill: var(--white); }
+html[data-theme="bauhaus"] .resume-mark:hover { background: var(--yellow); }
 html[data-theme="bauhaus"] .star.labeled { border: var(--rule); border-radius: 0; background: var(--white); color: var(--black); font-weight: 700; }
 html[data-theme="bauhaus"] .star.labeled[aria-pressed="true"] { background: var(--yellow); }
 html[data-theme="bauhaus"] .star.labeled .ico, html[data-theme="bauhaus"] .star.labeled[aria-pressed="true"] .ico { color: var(--black); }
