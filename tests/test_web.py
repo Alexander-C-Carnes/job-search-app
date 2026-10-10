@@ -452,6 +452,10 @@ def test_static_and_pdf_caching(env):
     assert r.headers["content-disposition"] == f'inline; filename="{name}"; filename*=UTF-8\'\'{quote(name)}'  # not "1.pdf"
     assert PdfReader(io.BytesIO(r.content)).metadata.title == name[:-4]  # the PDF viewer saves under this, not "<Name> Resume"
     assert c.get("/api/jobs/j1/resume/1.pdf", headers={**H, "If-None-Match": r.headers["etag"]}).status_code == 304
+    # The app links to it by a path ending in that name, so no browser falls back on another one.
+    assert c.get("/api/jobs/j1", headers=H).json()["resume"]["pdf_name"] == name
+    named = c.get(f"/api/jobs/j1/resume/1/{quote(name)}", headers=H)
+    assert named.content == r.content and named.headers["content-disposition"] == r.headers["content-disposition"]
     assert c.get("/api/summary", headers=H).headers["cache-control"] == "no-store"
 
 
@@ -1121,6 +1125,7 @@ def test_sent_resume_recorded_when_applied_and_kept_in_notion(env):
     s = c.get("/api/jobs/j1/sent", headers=H).json()
     assert s["sent"]["source"] == "app" and s["sent"]["note"] == "v1" and s["sent"]["name"] == env["pdf"].name
     assert PdfReader(io.BytesIO(c.get("/api/jobs/j1/sent.pdf", headers=H).content)).metadata.title == env["pdf"].stem
+    assert c.get(f"/api/jobs/j1/sent/file/{env['pdf'].name}", headers=H).content == c.get("/api/jobs/j1/sent.pdf", headers=H).content
     assert jobs("?wait=1")["j1"]["pending"] is False
     assert notion.rows["p1"]["properties"]["Resume Used"]["files"][0]["name"] == env["pdf"].name
     role = c.get("/api/jobs/j1", headers=H).json()["title"]

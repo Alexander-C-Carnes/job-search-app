@@ -40,6 +40,9 @@ async function api(path, opts = {}) {
 const send = (method) => (path, body) => api(path, { method, body: JSON.stringify(body || {}) });
 const post = send("POST"), put = send("PUT"), patch = send("PATCH");
 const fileUrl = (path) => `${path}${path.includes("?") ? "&" : "?"}t=${encodeURIComponent(TOKEN)}`;
+// A résumé version's PDF, by a link that ends in its download name ("<Name> - <Role> Resume.pdf"), so the
+// browser saves it under that whichever name it goes by.
+const resumeUrl = (id, which, r) => fileUrl(`/api/jobs/${id}/resume/${which}/${encodeURIComponent(r.pdf_name || "resume.pdf")}`);
 
 // ---- tiny DOM helpers ------------------------------------------------------------------
 const $ = (s, root = document) => root.querySelector(s);
@@ -1441,7 +1444,7 @@ async function renderSent(j, panel) {
   }
   const x = o.sent;
   const where = x.source === "notion" ? "" : o.in_notion ? " · In Notion" : o.notion ? " · Goes to Notion on the next sync" : "";
-  const src = fileUrl(`/api/jobs/${id}/sent.pdf`) + `&n=${encodeURIComponent(x.recorded || x.name)}`;
+  const src = fileUrl(`/api/jobs/${id}/sent/file/${encodeURIComponent(x.name)}`) + `&n=${encodeURIComponent(x.recorded || x.name)}`;
   const forget = x.source !== "notion" && h("button", { class: "ghost danger", onclick: async () => {
     if (!confirm("Remove the copy kept here? Notion's Resume Used isn't changed.")) return;
     try { await api(`/api/jobs/${id}/sent`, { method: "DELETE" }); done("Removed."); }
@@ -1696,9 +1699,9 @@ function renderResume(d, panel) {
   const id = encodeURIComponent(d.id);
   const versionSel = h("select", {}, ...r.versions.slice().reverse().map((v) =>
     h("option", { value: v.n, selected: v.n === r.current }, `v${v.n}${v.n === r.current ? " (current)" : ""}`)));
-  const frame = h("iframe", { src: fileUrl(`/api/jobs/${id}/resume/${r.current}.pdf`), title: "Résumé PDF" });
-  versionSel.addEventListener("change", () => { pdf.single(); frame.src = fileUrl(`/api/jobs/${id}/resume/${versionSel.value}.pdf`); });
-  const pdfLink = h("a", { href: fileUrl(`/api/jobs/${id}/resume/${r.current}.pdf`), target: "_blank" }, "Open PDF ↗");
+  const frame = h("iframe", { src: resumeUrl(id, r.current, r), title: "Résumé PDF" });
+  versionSel.addEventListener("change", () => { pdf.single(); frame.src = resumeUrl(id, versionSel.value, r); });
+  const pdfLink = h("a", { href: resumeUrl(id, r.current, r), target: "_blank" }, "Open PDF ↗");
   const editBtn = h("button", { class: "ghost small", title: "Change the wording yourself, right on the page" }, "Edit on page");
   const fmtNote = formatNote(d, r, (text, fmt) => { instr.value = chat.draft = text; send(fmt); });
   const pdfbar = h("div", { class: "pdfbar" }, "Version", versionSel, pdfLink, h("span", { class: "grow" }), editBtn);
@@ -2017,7 +2020,7 @@ function sideBySide(d, r, pane) {
     return h("div", { class: "side-col" },
       h("div", { class: "side-cap" }, h("span", { class: `vtag ${tag.toLowerCase()}` }, `${tag} · v${n}`), " ", versionShort(v),
         h("span", { class: "muted" }, ` · ${v.resume_score ?? "–"}/10 · ${pct(v.ats)}`)),
-      h("iframe", { src: fileUrl(`/api/jobs/${id}/resume/${n}.pdf`), title: `Résumé v${n}` }));
+      h("iframe", { src: resumeUrl(id, n, r), title: `Résumé v${n}` }));
   };
   let saved = null;            // the pane's own children while the two PDFs are up
   const show = () => {
@@ -2254,7 +2257,7 @@ function checkBadge(check) {
 
 function renderProposal(d, p, box, frame, cur) {
   const id = encodeURIComponent(d.id);
-  frame.src = fileUrl(`/api/jobs/${id}/resume/proposal.pdf`) + `&n=${Date.now()}`;
+  frame.src = resumeUrl(id, "proposal", d.resume) + `&n=${Date.now()}`;
   const j = S.byId.get(d.id);
   const delta = (now, was, unit = "") => {
     const dv = now != null && was != null ? Math.round((now - was) * 10) / 10 : 0;

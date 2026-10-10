@@ -329,7 +329,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         h = ws.history()
         fmt, default = ws.format, default_format()
         return {"current": h["current"], "versions": h["versions"], "proposal": bool(h.get("proposal")),
-                "title": ws.title(), "editable": ws.editable(), "chat": chat_payload(ws), "chat_busy": chat_busy(jid),
+                "title": ws.title(), "pdf_name": resume_filename(board.row(jid)), "editable": ws.editable(), "chat": chat_payload(ws), "chat_busy": chat_busy(jid),
                 "format": {"id": fmt.id, "name": fmt.name, "max_pages": fmt.max_pages},
                 "default_format": {"id": default.id, "name": default.name, "max_pages": default.max_pages,
                                    "pages_word": default.pages_word}}
@@ -765,7 +765,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         return sent_payload(tracked(jid))
 
     @app.get("/api/jobs/{jid}/sent.pdf")
-    def sent_pdf(jid: str, request: Request):
+    @app.get("/api/jobs/{jid}/sent/file/{name}")
+    def sent_pdf(jid: str, request: Request, name: str = ""):
         row = tracked(jid)
         info, names = sent_info(row)
         if not info:
@@ -816,7 +817,10 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         return sent_payload(row)
 
     @app.get("/api/jobs/{jid}/resume/{which}.pdf")
-    def resume_pdf(jid: str, which: str, request: Request):
+    @app.get("/api/jobs/{jid}/resume/{which}/{name}")
+    def resume_pdf(jid: str, which: str, request: Request, name: str = ""):
+        """A version's PDF. The app links to it by the second path, which ends in the résumé's download
+        name, since Arc saved some PDFs under a name it remembered for the old "1.pdf" link."""
         if which != "proposal" and not which.isdigit():
             raise HTTPException(400, "Bad version")
         try:
