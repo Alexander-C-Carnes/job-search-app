@@ -277,39 +277,28 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             plain = re.sub(r'[^ -~]|["\\]', "_", filename)
             headers["Content-Disposition"] = f'inline; filename="{plain}"; filename*=UTF-8\'\'{quote(filename)}'
             if retitle:
-                data = titled_pdf(path, filename.removesuffix(".pdf"))
+                data = render.retitled(path, filename.removesuffix(".pdf"))
                 if data is not None:
                     return Response(data, media_type=media_type, headers=headers)
         return FileResponse(path, media_type=media_type, headers=headers)
 
-    def titled_pdf(path: Path, title: str) -> Optional[bytes]:
-        """The PDF with its Title set to `title`; None if it can't be read as a PDF."""
-        from io import BytesIO
-
-        from pypdf import PdfWriter
-        try:
-            w = PdfWriter(clone_from=path)
-            w.add_metadata({"/Title": title})
-            buf = BytesIO()
-            w.write(buf)
-            return buf.getvalue()
-        except Exception:  # noqa: BLE001 - not a PDF pypdf can read; serve it as it is
-            return None
-
     def resume_filename(row: Optional[dict]) -> str:
         """The résumé's download name: "<Name> - <Role Title> Resume.pdf"."""
-        title = re.sub(r'[\\/:*?"<>|\s]+', " ", (row or {}).get("title") or "").strip(" .")
-        return f"{config.candidate().name} - {title} Resume.pdf" if title else f"{config.candidate().name} Resume.pdf"
+        return config.candidate().resume_title((row or {}).get("title") or "") + ".pdf"
 
     def workspace(jid: str) -> ResumeWorkspace:
         st = board.state().get(jid) or {}
         run_dir = local_path(st.get("run_dir"))
         if run_dir:
-            return ResumeWorkspace(run_dir, local_path(st.get("pdf")) or (Path(st["pdf"]) if st.get("pdf") else None))
+            return ResumeWorkspace(run_dir, local_path(st.get("pdf")) or (Path(st["pdf"]) if st.get("pdf") else None),
+                                   role_of(jid))
         src = outside_resume(jid)[0]
         if not src:
             raise HTTPException(404, "This job hasn't been tailored yet.")
-        return ResumeWorkspace(linked.workspace_dir(jid, src, store.root))
+        return ResumeWorkspace(linked.workspace_dir(jid, src, store.root), role=role_of(jid))
+
+    def role_of(jid: str) -> str:
+        return (board.row(jid) or {}).get("title") or ""
 
     def outside_resume(jid: str) -> tuple[Optional[dict], bool, list[dict]]:
         """For a job the app didn't tailor: the résumé made elsewhere that it shows (the one picked
@@ -701,7 +690,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     def get_outside_resume(jid: str):
         """A résumé made outside the app (a resume-job-fit run or a saved résumé) for a job it didn't tailor."""
         src, matched, srcs = outside_resume(jid)
-        ws = ResumeWorkspace(linked.workspace_dir(jid, src, store.root)) if src else None
+        ws = ResumeWorkspace(linked.workspace_dir(jid, src, store.root), role=role_of(jid)) if src else None
         try:
             resume = resume_payload(ws, jid) if ws else None
         except EditError as e:
@@ -765,7 +754,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         name = (ws.exported_pdf.name if ws.exported_pdf else
                 f"{config.candidate().pdf_prefix}-{slug(row['company'] or 'Company', max_len=30)}-"
                 f"{slug(row['title'] or 'Role', max_len=60)}.pdf")
-        rec = sent.record(row["tracker_id"], name, pdf.read_bytes(), "app", f"v{h['current']}")
+        data = render.retitled(pdf, resume_filename(row).removesuffix(".pdf")) or pdf.read_bytes()   # drawn before titles were per role
+        rec = sent.record(row["tracker_id"], name, data, "app", f"v{h['current']}")
         local.queue_resume(row["tracker_id"], rec["path"])
         sync.kick()
         return rec
@@ -796,7 +786,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             except ValueError:
                 raise HTTPException(415, f"{files[0]['name']} in Notion isn't a PDF, so it can't be shown here. "
                                          "Open it from the Notion row.") from None
-        return cached_file(request, info["path"], "application/pdf", info["name"])
+        return cached_file(request, info["path"], "application/pdf", info["name"], retitle=True)
 
     @app.put("/api/jobs/{jid}/sent")
     async def upload_sent(jid: str, request: Request):

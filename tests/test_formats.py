@@ -1,11 +1,12 @@
 """Résumé formats: every format draws the same words, within its page limit, in a way an ATS can read."""
+import io
 import re
 
 import pytest
 from pypdf import PdfReader
 
 from conftest import EXAMPLE_REFS
-from jobpipe import formats, render
+from jobpipe import config, formats, render
 
 EXAMPLE = (EXAMPLE_REFS / "resume-platform.md").read_text()
 
@@ -129,3 +130,14 @@ def test_check_resume_warns_by_the_formats_page_limit(tmp_path):
                                      "--title", "Senior Technical Program Manager, Platform", *a],
                                     capture_output=True, text=True).stdout
     assert "likely over one page" in run("--max-pages", "1") and "likely over" not in run()
+
+
+def test_a_pdf_is_titled_after_the_role(tmp_path):
+    """Browsers save a PDF under its own title, so a résumé's title names the role."""
+    assert config.candidate().resume_title('Staff TPM: Platform/Infra') == f"{config.candidate().name} - Staff TPM Platform Infra Resume"
+    assert config.candidate().resume_title("") == f"{config.candidate().name} Resume"
+    assert "<title>X - Role Resume</title>" in render.render(EXAMPLE, title="X - Role Resume")
+    render.render_pdf(EXAMPLE, tmp_path / "x.pdf", title="X - Role Resume")
+    assert PdfReader(tmp_path / "x.pdf").metadata.title == "X - Role Resume"
+    assert PdfReader(io.BytesIO(render.retitled(tmp_path / "x.pdf", "Y"))).metadata.title == "Y"
+    assert render.retitled(tmp_path / "missing.pdf", "Y") is None

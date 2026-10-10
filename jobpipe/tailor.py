@@ -678,7 +678,8 @@ class Tailor:
         pdf = self.out_dir / pdf_name
         pdf_text, pages = "", 0
         try:
-            pages, pdf_text = await asyncio.to_thread(render.render_pdf, final_md, pdf, run_dir / "resume-final.html", fmt)
+            pages, pdf_text = await asyncio.to_thread(render.render_pdf, final_md, pdf, run_dir / "resume-final.html", fmt,
+                                                      config.candidate().resume_title(title))
             trimmed = False
             for _ in range(2):                  # over the page limit: cut it back (deleting only), then render again
                 if pages <= fmt.max_pages:
@@ -695,7 +696,8 @@ class Tailor:
                                "trace-final.md (current)": trace.read_text() if trace.exists() else ""},
                     expect=["resume-final.md", "trace-final.md"], run_dir=run_dir))
                 final_md, trimmed = trim.files["resume-final.md"], True
-                pages, pdf_text = await asyncio.to_thread(render.render_pdf, final_md, pdf, run_dir / "resume-final.html", fmt)
+                pages, pdf_text = await asyncio.to_thread(render.render_pdf, final_md, pdf, run_dir / "resume-final.html", fmt,
+                                                      config.candidate().resume_title(title))
             if trimmed:
                 (run_dir / "resume-final.md").write_text(final_md, encoding="utf-8")
                 await self._honesty(final_md, title, jd_md, match_md, index, run_dir, warnings, review=False)

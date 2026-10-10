@@ -91,6 +91,12 @@ def _now() -> str:
 class ResumeWorkspace:
     run_dir: Path
     exported_pdf: Optional[Path] = None  # the pipeline's deliverable PDF; kept in sync with the current version
+    role: str = ""                       # the job's title, for the PDF's own title (else the posting's)
+
+    @property
+    def pdf_title(self) -> str:
+        """The PDFs' title, which browsers save them under: "<Name> - <Role Title> Resume"."""
+        return config.candidate().resume_title(self.role or self.title())
 
     @property
     def vdir(self) -> Path:
@@ -135,7 +141,7 @@ class ResumeWorkspace:
         if self.exported_pdf and self.exported_pdf.exists():
             shutil.copy(self.exported_pdf, self.vdir / "v1.pdf")
         else:
-            render.render_pdf(src.read_text(), self.vdir / "v1.pdf", fmt=fid)
+            render.render_pdf(src.read_text(), self.vdir / "v1.pdf", fmt=fid, title=self.pdf_title)
         check = self.check(self.vdir / "v1.md", formats.get(fid))
         md = (self.vdir / "v1.md").read_text()
         pdf_txt = self.run_dir / "resume-final.pdf.txt"     # the text the tailoring run's ATS total was measured on
@@ -388,7 +394,7 @@ class ResumeWorkspace:
         async def rate() -> Optional[dict]:
             return await self.rerate(new_md, pending or current, prior, runner, cfg) if prior else None
         (pages, pdf_text), check, rated = await asyncio.gather(
-            asyncio.to_thread(render.render_pdf, new_md, self.vdir / "proposal.pdf", None, target),
+            asyncio.to_thread(render.render_pdf, new_md, self.vdir / "proposal.pdf", None, target, self.pdf_title),
             asyncio.to_thread(self.check, prop_md, target), rate())
         scores = {}
         if prior:
@@ -449,7 +455,7 @@ class ResumeWorkspace:
         if old.get("format") == h.get("format"):
             shutil.copy(self.vdir / f"v{n}.pdf", self.vdir / f"v{new}.pdf")
         else:                       # drawn in another format: redraw it in the résumé's current one
-            render.render_pdf(self.md(n), self.vdir / f"v{new}.pdf", fmt=self.format)
+            render.render_pdf(self.md(n), self.vdir / f"v{new}.pdf", fmt=self.format, title=self.pdf_title)
         h["versions"].append({**old, "n": new, "created": _now(), "source": f"restored v{n}",
                               "instruction": "", "changes": f"Restored version {n}.", "format": h.get("format")})
         h["current"] = new
@@ -487,7 +493,7 @@ class ResumeWorkspace:
         md = md.rstrip("\n") + "\n"
         (self.vdir / f"v{n}.md").write_text(md)
         fmt = self.format
-        pages, pdf_text = render.render_pdf(md, self.vdir / f"v{n}.pdf", fmt=fmt)
+        pages, pdf_text = render.render_pdf(md, self.vdir / f"v{n}.pdf", fmt=fmt, title=self.pdf_title)
         (self.vdir / f"v{n}.pdf.txt").write_text(pdf_text or md)     # what rescore() measures keywords on
         for f in ("proposal.md", "proposal.pdf"):    # a pending proposal was built on the old version
             (self.vdir / f).unlink(missing_ok=True)
@@ -533,7 +539,7 @@ class ResumeWorkspace:
             return {"applied": True, "pages": None, "format": fmt.id}
         n = h["current"]
         tmp = self.vdir / "redraw.pdf"
-        pages, text = (printer.pdf if printer else render.render_pdf)(self.md(n), tmp, fmt=fmt)
+        pages, text = (printer.pdf if printer else render.render_pdf)(self.md(n), tmp, fmt=fmt, title=self.pdf_title)
         if pages > fmt.max_pages:
             tmp.unlink(missing_ok=True)
             return {"applied": False, "pages": pages, "format": h.get("format") or self._drawn_in()}

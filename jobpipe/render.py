@@ -9,10 +9,11 @@ import argparse
 import html
 import os
 import re
+from io import BytesIO
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 
 from . import formats
 
@@ -107,9 +108,10 @@ EDIT_CSS = SHEET_CSS + """
 """
 
 
-def render(md, editable=False, fmt=None):
+def render(md, editable=False, fmt=None, title=None):
     """The résumé as an HTML page in format `fmt` (an id or a Format; the default when None). With
-    `editable`, every piece of text is a click-to-edit span for the page editor."""
+    `editable`, every piece of text is a click-to-edit span for the page editor. `title` is the page's
+    title, and so the PDF's, which browsers save it under (default "<Name> Resume")."""
     fmt = fmt if isinstance(fmt, formats.Format) else formats.get(fmt)
     lines = md.splitlines()
     i = 0
@@ -257,7 +259,7 @@ def render(md, editable=False, fmt=None):
             body.append(f"<p>{text}</p>")
     close_job()
     body = _reorder(body, starts, fmt.order)
-    title = f"{name} Resume"
+    title = title or f"{name} Resume"
     page = (f"@page {{ margin: {fmt.margin_in}in; }}\n"
             f":root {{ --margin: {fmt.margin_in}in; --accent: {fmt.accent or '#000000'}; }}\n")
     return (f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title>"
@@ -313,11 +315,11 @@ class Printer:
         finally:
             pg.close()
 
-    def pdf(self, md_text, pdf_path, html_path=None, fmt=None):
+    def pdf(self, md_text, pdf_path, html_path=None, fmt=None, title=None):
         """Render to PDF. Returns (pages, extracted_text). Tightens spacing once if over the format's page
         limit (the skill's fix for a tight page: smaller gaps before headings, never smaller text)."""
         fmt = fmt if isinstance(fmt, formats.Format) else formats.get(fmt)
-        doc = render(md_text, fmt=fmt)
+        doc = render(md_text, fmt=fmt, title=title)
         self.print(doc, pdf_path)
         pages = len(PdfReader(str(pdf_path)).pages)
         if pages > fmt.max_pages and fmt.tighten:
@@ -330,10 +332,22 @@ class Printer:
         return pages, text
 
 
-def render_pdf(md_text, pdf_path, html_path=None, fmt=None):
-    """Render to PDF in format `fmt`. Returns (pages, extracted_text)."""
+def render_pdf(md_text, pdf_path, html_path=None, fmt=None, title=None):
+    """Render to PDF in format `fmt`, titled `title`. Returns (pages, extracted_text)."""
     with Printer() as pr:
-        return pr.pdf(md_text, pdf_path, html_path, fmt)
+        return pr.pdf(md_text, pdf_path, html_path, fmt, title)
+
+
+def retitled(path, title):
+    """The PDF's bytes with its Title set to `title` (what browsers save it under); None if pypdf can't read it."""
+    try:
+        w = PdfWriter(clone_from=str(path))
+        w.add_metadata({"/Title": title})
+        buf = BytesIO()
+        w.write(buf)
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001 - not a PDF pypdf can read
+        return None
 
 
 def main():

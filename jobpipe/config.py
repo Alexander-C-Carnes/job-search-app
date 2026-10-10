@@ -91,6 +91,11 @@ class Candidate:
     def first_name(self) -> str:
         return (self.name.split() or [""])[0]
 
+    def resume_title(self, role: str = "") -> str:
+        """A résumé PDF's title, which browsers save it under: "<Name> - <Role Title> Resume"."""
+        role = re.sub(r'[\\/:*?"<>|\s]+', " ", role or "").strip(" .")
+        return f"{self.name} - {role} Resume" if role else f"{self.name} Resume"
+
     @property
     def contact(self) -> str:
         return " | ".join(x for x in (self.city, self.phone, self.email, self.linkedin) if x)

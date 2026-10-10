@@ -1101,6 +1101,9 @@ def test_outside_resume_for_a_job_only_in_the_tracker(env, tmp_path):
     assert p.status_code == 200
     assert c.post("/api/jobs/notion-p9/edit/accept", headers=H).json()["current"] == 2
     assert not (run / "versions").exists()      # edits stay in data/, never in the repo's run folder
+    v2 = next(env["store"].root.glob("linked/*/versions/v2.pdf"))
+    role = next(j for j in c.get("/api/jobs", headers=H).json()["jobs"] if j["id"] == "notion-p9")["title"]
+    assert PdfReader(v2).metadata.title == config.candidate().resume_title(role)   # drawn with the role's name
 
     assert c.post("/api/jobs/notion-p9/outside-resume", headers=H, json={"source": "none"}).json()["resume"] is None
     assert c.post("/api/jobs/notion-p9/outside-resume", headers=H, json={"source": "../x"}).status_code == 400
@@ -1117,9 +1120,12 @@ def test_sent_resume_recorded_when_applied_and_kept_in_notion(env):
     c.post("/api/tracker/p1/status", headers=H, json={"status": "Applied"})
     s = c.get("/api/jobs/j1/sent", headers=H).json()
     assert s["sent"]["source"] == "app" and s["sent"]["note"] == "v1" and s["sent"]["name"] == env["pdf"].name
-    assert c.get("/api/jobs/j1/sent.pdf", headers=H).content[:5] == b"%PDF-"
+    assert PdfReader(io.BytesIO(c.get("/api/jobs/j1/sent.pdf", headers=H).content)).metadata.title == env["pdf"].stem
     assert jobs("?wait=1")["j1"]["pending"] is False
     assert notion.rows["p1"]["properties"]["Resume Used"]["files"][0]["name"] == env["pdf"].name
+    role = c.get("/api/jobs/j1", headers=H).json()["title"]
+    sent_copy = next(data for name, data in notion.uploads.values() if name == env["pdf"].name)
+    assert PdfReader(io.BytesIO(sent_copy)).metadata.title == config.candidate().resume_title(role)   # not "<Name> Resume"
 
     # A file already in Notion's Resume Used is shown (downloaded once), and never replaced by an upload.
     pdf = env["pdf"].read_bytes()
@@ -1128,7 +1134,8 @@ def test_sent_resume_recorded_when_applied_and_kept_in_notion(env):
         {"name": "Sent-Zeta.pdf", "type": "file", "file": {"url": "https://files.example/fu9/Sent-Zeta.pdf"}}]}
     assert jobs("?refresh=1")["notion-p9"]["sent_resume"] == "Sent-Zeta.pdf"
     assert c.get("/api/jobs/notion-p9/sent", headers=H).json()["sent"]["source"] == "notion"
-    assert c.get("/api/jobs/notion-p9/sent.pdf", headers=H).content == pdf
+    shown = PdfReader(io.BytesIO(c.get("/api/jobs/notion-p9/sent.pdf", headers=H).content))
+    assert shown.metadata.title == "Sent-Zeta" and len(shown.pages) == len(PdfReader(env["pdf"]).pages)
     assert c.put("/api/jobs/notion-p9/sent", headers={**H, "X-Filename": "x.pdf"}, content=b"not a pdf").status_code == 400
     s = c.put("/api/jobs/notion-p9/sent", headers={**H, "X-Filename": "My%20Resume.pdf"}, content=pdf).json()
     assert s["sent"]["source"] == "upload" and s["sent"]["name"] == "My-Resume.pdf" and s["in_notion"]

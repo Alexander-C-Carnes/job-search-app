@@ -138,8 +138,8 @@ def test_resume_over_two_pages_is_trimmed(tmp_dirs, monkeypatch):
     from jobpipe import render
     real, calls = render.render_pdf, []
 
-    def render_pdf(md, pdf, html=None, fmt=None):   # the merged resume runs to three pages; the trimmed one fits
-        pages, text = real(md, pdf, html, fmt)
+    def render_pdf(md, pdf, html=None, fmt=None, title=None):   # the merged resume runs to three pages; the trimmed one fits
+        pages, text = real(md, pdf, html, fmt, title)
         calls.append(md)
         return (3 if len(calls) == 1 else pages), text
 
@@ -152,6 +152,7 @@ def test_resume_over_two_pages_is_trimmed(tmp_dirs, monkeypatch):
     trim = next(x for x in runner.calls if x.label == "trim")
     assert "renders to 3 pages" in trim.instructions and "deleting only" in trim.instructions
     assert c.tailored.pages == 2 and not any("page" in w for w in c.tailored.warnings)
+    assert PdfReader(c.tailored.pdf).metadata.title == "Jordan Rivera - Staff Technical Program Manager Resume"   # named after the role
     merge = next(x for x in runner.calls if x.label == "merge")
     assert "Hard length limit" in merge.instructions
 
@@ -163,8 +164,8 @@ def test_compact_format_writes_and_trims_to_one_page(tmp_dirs, monkeypatch):
     monkeypatch.setattr(config, "candidate", lambda path=None: dataclasses.replace(CANDIDATE, resume_format="compact"))
     real, calls = render.render_pdf, []
 
-    def render_pdf(md, pdf, html=None, fmt=None):   # two pages first; the trimmed one fits
-        pages, text = real(md, pdf, html, fmt)
+    def render_pdf(md, pdf, html=None, fmt=None, title=None):   # two pages first; the trimmed one fits
+        pages, text = real(md, pdf, html, fmt, title)
         calls.append(fmt.id)
         return (2 if len(calls) == 1 else pages), text
 
