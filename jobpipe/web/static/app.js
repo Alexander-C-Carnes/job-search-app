@@ -40,7 +40,7 @@ async function api(path, opts = {}) {
 const send = (method) => (path, body) => api(path, { method, body: JSON.stringify(body || {}) });
 const post = send("POST"), put = send("PUT"), patch = send("PATCH");
 const fileUrl = (path) => `${path}${path.includes("?") ? "&" : "?"}t=${encodeURIComponent(TOKEN)}`;
-// A résumé version's PDF, by a link that ends in its download name ("<Name> - <Role> Resume.pdf"), so the
+// A résumé version's PDF, by a link that ends in its download name ("<Role Title> - <Company>.pdf"), so the
 // browser saves it under that whichever name it goes by.
 const resumeUrl = (id, which, r) => fileUrl(`/api/jobs/${id}/resume/${which}/${encodeURIComponent(r.pdf_name || "resume.pdf")}`);
 
@@ -130,7 +130,7 @@ function savePrefs() {
   catch (_) { /* optional */ }
 }
 const S = { jobs: [], byId: new Map(), etag: null, notion: false, syncing: false, notionError: "",
-            query: "", tokens: [], stages: new Set(), flags: new Set(), visible: [],
+            query: "", tokens: [], stages: new Set(), flags: new Set(), facets: { score: new Set(), company: new Set() }, visible: [],
             sort: ["fit", "newest", "company"].includes(prefs.sort) ? prefs.sort : "fit",
             view: prefs.view === "board" ? "board" : "list", boardAll: new Set(),
             group: prefs.group === "company" ? "company" : "", collapsed: new Set(Array.isArray(prefs.collapsed) ? prefs.collapsed : []),
@@ -411,11 +411,26 @@ function renderSync() {
 }
 
 // ---- jobs: filters --------------------------------------------------------------------------
-const FLAGS = { starred: (j) => j.starred, referral: (j) => !!j.referral_url, remote: (j) => j.remote, tailored: (j) => j.tailored, startup: (j) => !!j.funding };
-function matches(j, { stages = true, flags = true } = {}) {
+const FLAGS = { starred: (j) => j.starred, referral: (j) => !!j.referral_url, remote: (j) => j.remote, tailored: (j) => j.tailored };
+// Filters with a choice of values, where a role matches any value picked: the score it shows (the full score
+// where there is one, else the signal score), and its kind of company (a startup is one whose round is known).
+const FACETS = {
+  score: { label: "Score", key: (j) => (score(j) == null ? "none" : String(Math.round(score(j)))),
+           // every score the list holds, best first, then Unscored
+           values: (keys) => keys.sort((a, b) => (a === "none") - (b === "none") || b - a),
+           name: (v) => (v === "none" ? "Unscored" : `${v}/10`),
+           title: (v) => (v === "none" ? "Roles with no signal or full score yet" : `Roles scoring ${v}/10: the full score where there is one, else the signal score`) },
+  company: { label: "Company", key: (j) => (j.funding ? "startup" : "corp"),
+             values: () => ["startup", "corp"],
+             name: (v) => (v === "startup" ? "Startup" : "Corporation"),
+             title: (v) => (v === "startup" ? "Roles at a startup whose funding round is known (see the Startups tab)"
+                                            : "Roles at companies that aren't startups with a known round") },
+};
+function matches(j, { stages = true, flags = true, skip = "" } = {}) {
   if (!SCOPES[S.scope].has(j)) return false;
   for (const t of S.tokens) if (!j._hay.includes(t)) return false;
   if (flags) for (const f of S.flags) if (!FLAGS[f](j)) return false;
+  for (const [k, f] of Object.entries(FACETS)) if (k !== skip && S.facets[k].size && !S.facets[k].has(f.key(j))) return false;
   if (!stages) return true;
   if (S.scope === "find") return FIND_FILTERS.find(([k]) => k === S.findFilter)[2](j);
   return !(S.stages.size && !S.stages.has(stageOf(j)));
@@ -463,10 +478,12 @@ function groupHead(key, jobs) {
     S.scope === "tracker" && h("span", { class: "group-stages" },
       ...stages.map(([st, n]) => h("span", { class: "tag stage-tag", "data-stage": st, title: st }, `${n} ${st}`))));
 }
-const filtersOn = () => S.tokens.length || S.flags.size || (S.scope === "find" ? S.findFilter !== "new" : S.stages.size);
+const facetsOn = () => Object.values(S.facets).some((v) => v.size);
+const clearFacets = () => Object.values(S.facets).forEach((v) => v.clear());
+const filtersOn = () => S.tokens.length || S.flags.size || facetsOn() || (S.scope === "find" ? S.findFilter !== "new" : S.stages.size);
 function clearFilters() {
   S.query = ""; $("#job-filter").value = "";
-  S.stages.clear(); S.flags.clear(); S.findFilter = "new";
+  S.stages.clear(); S.flags.clear(); clearFacets(); S.findFilter = "new";
   renderJobs();
 }
 const boardMode = () => S.scope === "tracker" && S.view === "board";
@@ -505,7 +522,9 @@ function renderFindFilters() {
 }
 
 // With a search or a chip on, the stage counts are of the roles showing; this says so: "1/10", 1 of 10 in all.
-const narrowedBy = () => [...[...S.flags].map((f) => FLAG_NAMES[f]), ...(S.query.trim() ? [`“${S.query.trim()}”`] : [])];
+const facetNames = () => Object.entries(FACETS).filter(([k]) => S.facets[k].size).map(([k, f]) =>
+  k === "score" ? `Score ${f.values([...S.facets[k]]).map((v) => (v === "none" ? "unscored" : v)).join(", ")}` : [...S.facets[k]].map(f.name).join(" or "));
+const narrowedBy = () => [...[...S.flags].map((f) => FLAG_NAMES[f]), ...facetNames(), ...(S.query.trim() ? [`“${S.query.trim()}”`] : [])];
 const ofAll = (n, total) => (narrowedBy().length && n !== total ? h("small", { class: "of" }, `/${total}`) : null);
 function renderStages() {
   const counts = Object.fromEntries(STAGES.map((s) => [s, 0]));
@@ -538,6 +557,21 @@ function renderFlags() {
     $("b", b).textContent = S.jobs.reduce((n, j) => n + (matches(j) && FLAGS[f](j) ? 1 : 0), 0);
   });
 }
+// Each value's count is of the roles the other filters leave, so it says what picking it would show.
+function renderFacets() {
+  const inScope = S.jobs.filter((j) => SCOPES[S.scope].has(j));
+  for (const [k, f] of Object.entries(FACETS)) {
+    const shown = S.jobs.filter((j) => matches(j, { skip: k }));
+    const vals = f.values([...new Set([...inScope.map(f.key), ...S.facets[k]])]);
+    $(`#${k}-chips`).replaceChildren(...(inScope.length ? [h("span", { class: "facet-label" }, f.label)] : []), ...(inScope.length ? vals : []).map((v) => {
+      const n = shown.reduce((c, j) => c + (f.key(j) === v ? 1 : 0), 0);
+      return h("button", { class: "chip", "data-facet": k, "data-value": v, "data-fit": k === "score" ? fitClass(v === "none" ? null : +v) || "none" : null,
+        "aria-pressed": String(S.facets[k].has(v)), title: f.title(v),
+        onclick: () => { S.facets[k].has(v) ? S.facets[k].delete(v) : S.facets[k].add(v); renderJobs(); } },
+        k === "score" && v !== "none" ? h("span", { class: "sc" }, v) : f.name(v), " ", h("b", {}, n));
+    }));
+  }
+}
 $$("#flags .chip").forEach((b) => b.addEventListener("click", () => {
   const f = b.dataset.flag;
   S.flags.has(f) ? S.flags.delete(f) : S.flags.add(f);
@@ -563,7 +597,7 @@ function setView(view) {
 // Three parts fold on their own so the selected role, and above all its résumé and the chat, get the room:
 // the filters to one strip, the list to a rail of scores, the role's header to one line.
 const FOLDS = ["filters", "list", "head"];
-const FLAG_NAMES = { starred: "Starred", referral: "Has referral", remote: "Remote", tailored: "Has résumé", startup: "Startup" };
+const FLAG_NAMES = { starred: "Starred", referral: "Has referral", remote: "Remote", tailored: "Has résumé" };
 const allFolded = () => FOLDS.every((k) => S.fold[k]);
 function applyFolds() {
   const tab = $("#tab-jobs");
@@ -612,8 +646,7 @@ function renderFoldStrip() {
       })
     : $$("#find-seg button").map((b) => h("button", { class: "chip", "aria-pressed": String(b.classList.contains("active")), onclick: () => b.click() },
         b.firstChild.textContent.trim(), " ", h("b", {}, $("b", b)?.textContent ?? "")));
-  const showing = [...(S.scope === "tracker" ? [...S.stages] : []), ...[...S.flags].map((f) => FLAG_NAMES[f]),
-                   ...(S.query.trim() ? [`“${S.query.trim()}”`] : [])];
+  const showing = [...(S.scope === "tracker" ? [...S.stages] : []), ...narrowedBy()];
   strip.replaceChildren(
     h("button", { class: "ghost small fold-open", "aria-expanded": "false", title: "Show the search and filters", onclick: () => setFold("filters", false) },
       icon("down"), "Filters"),
@@ -822,6 +855,7 @@ function renderJobs() {
   if (S.scope === "tracker") renderStages();
   else renderFindFilters();
   renderFlags();
+  renderFacets();
   const list = S.visible = visibleJobs();
   $("#list-count").replaceChildren(...(filtersOn()
     ? [`${list.length} of ${plural(S.jobs.length, "role")}`, h("button", { class: "link-btn", onclick: clearFilters }, "Clear filters")]
@@ -1444,7 +1478,7 @@ async function renderSent(j, panel) {
   }
   const x = o.sent;
   const where = x.source === "notion" ? "" : o.in_notion ? " · In Notion" : o.notion ? " · Goes to Notion on the next sync" : "";
-  const src = fileUrl(`/api/jobs/${id}/sent/file/${encodeURIComponent(x.name)}`) + `&n=${encodeURIComponent(x.recorded || x.name)}`;
+  const src = fileUrl(`/api/jobs/${id}/sent/file/${encodeURIComponent(x.download_name || x.name)}`) + `&n=${encodeURIComponent(x.recorded || x.name)}`;
   const forget = x.source !== "notion" && h("button", { class: "ghost danger", onclick: async () => {
     if (!confirm("Remove the copy kept here? Notion's Resume Used isn't changed.")) return;
     try { await api(`/api/jobs/${id}/sent`, { method: "DELETE" }); done("Removed."); }
@@ -2398,7 +2432,7 @@ addForm.addEventListener("submit", async (e) => {
     await loadJobs();
     if (existing) { toast("That job is already here. Opening it."); openJob(id); return; }
     S.sel.find = id;                 // an added job is untracked, so it lands in Find jobs
-    S.query = ""; $("#job-filter").value = ""; S.flags.clear(); S.findFilter = "new";
+    S.query = ""; $("#job-filter").value = ""; S.flags.clear(); clearFacets(); S.findFilter = "new";
     showTab("find");
     selectJob(id, true);
     scoreJobs([id], "signal");
@@ -2752,7 +2786,7 @@ function renderStartupState() {
     el.replaceChildren(`Sources and boards read ${new Date(SU.refreshed).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
       + (hours ? `, again every ${hours}h on its own` : "") + " · ",
       h("button", { class: "link-btn", title: "Roles matching your filters are added there on each refresh, with the round.",
-        onclick: () => { showTab("find"); S.flags.clear(); S.flags.add("startup"); renderJobs(); } }, `${plural(inFind, "startup role")} in Find jobs`));
+        onclick: () => { showTab("find"); S.flags.clear(); clearFacets(); S.facets.company.add("startup"); renderJobs(); } }, `${plural(inFind, "startup role")} in Find jobs`));
   } else el.textContent = "";
 }
 function renderStartups() {

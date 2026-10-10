@@ -134,7 +134,8 @@ def test_check_resume_warns_by_the_formats_page_limit(tmp_path):
 
 def test_a_pdf_is_titled_after_the_role(tmp_path):
     """Browsers save a PDF under its own title, so a résumé's title names the role."""
-    assert config.candidate().resume_title('Staff TPM: Platform/Infra') == f"{config.candidate().name} - Staff TPM Platform Infra Resume"
+    assert config.candidate().resume_title('Staff TPM: Platform/Infra', "Acme") == "Staff TPM Platform Infra - Acme"
+    assert config.candidate().resume_title("Staff TPM") == "Staff TPM"
     assert config.candidate().resume_title("") == f"{config.candidate().name} Resume"
     assert "<title>X - Role Resume</title>" in render.render(EXAMPLE, title="X - Role Resume")
     render.render_pdf(EXAMPLE, tmp_path / "x.pdf", title="X - Role Resume")

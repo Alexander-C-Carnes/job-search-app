@@ -91,10 +91,10 @@ class Candidate:
     def first_name(self) -> str:
         return (self.name.split() or [""])[0]
 
-    def resume_title(self, role: str = "") -> str:
-        """A résumé PDF's title, which browsers save it under: "<Name> - <Role Title> Resume"."""
-        role = re.sub(r'[\\/:*?"<>|\s]+', " ", role or "").strip(" .")
-        return f"{self.name} - {role} Resume" if role else f"{self.name} Resume"
+    def resume_title(self, role: str = "", company: str = "") -> str:
+        """A résumé PDF's title, which browsers save it under: "<Role Title> - <Company>"."""
+        role, company = (re.sub(r'[\\/:*?"<>|\s]+', " ", x or "").strip(" .") for x in (role, company))
+        return " - ".join(x for x in (role, company) if x) or f"{self.name} Resume"
 
     @property
     def contact(self) -> str:

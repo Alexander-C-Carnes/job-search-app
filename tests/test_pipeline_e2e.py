@@ -152,7 +152,7 @@ def test_resume_over_two_pages_is_trimmed(tmp_dirs, monkeypatch):
     trim = next(x for x in runner.calls if x.label == "trim")
     assert "renders to 3 pages" in trim.instructions and "deleting only" in trim.instructions
     assert c.tailored.pages == 2 and not any("page" in w for w in c.tailored.warnings)
-    assert PdfReader(c.tailored.pdf).metadata.title == "Jordan Rivera - Staff Technical Program Manager Resume"   # named after the role
+    assert PdfReader(c.tailored.pdf).metadata.title == "Staff Technical Program Manager - Acme"   # named after the role and company
     merge = next(x for x in runner.calls if x.label == "merge")
     assert "Hard length limit" in merge.instructions
 

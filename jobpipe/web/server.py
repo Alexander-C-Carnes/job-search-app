@@ -283,22 +283,24 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
         return FileResponse(path, media_type=media_type, headers=headers)
 
     def resume_filename(row: Optional[dict]) -> str:
-        """The résumé's download name: "<Name> - <Role Title> Resume.pdf"."""
-        return config.candidate().resume_title((row or {}).get("title") or "") + ".pdf"
+        """The résumé's download name: "<Role Title> - <Company>.pdf"."""
+        row = row or {}
+        return config.candidate().resume_title(row.get("title") or "", row.get("company") or "") + ".pdf"
 
     def workspace(jid: str) -> ResumeWorkspace:
         st = board.state().get(jid) or {}
         run_dir = local_path(st.get("run_dir"))
         if run_dir:
             return ResumeWorkspace(run_dir, local_path(st.get("pdf")) or (Path(st["pdf"]) if st.get("pdf") else None),
-                                   role_of(jid))
+                                   **role_of(jid))
         src = outside_resume(jid)[0]
         if not src:
             raise HTTPException(404, "This job hasn't been tailored yet.")
-        return ResumeWorkspace(linked.workspace_dir(jid, src, store.root), role=role_of(jid))
+        return ResumeWorkspace(linked.workspace_dir(jid, src, store.root), **role_of(jid))
 
-    def role_of(jid: str) -> str:
-        return (board.row(jid) or {}).get("title") or ""
+    def role_of(jid: str) -> dict:
+        row = board.row(jid) or {}
+        return {"role": row.get("title") or "", "company": row.get("company") or ""}
 
     def outside_resume(jid: str) -> tuple[Optional[dict], bool, list[dict]]:
         """For a job the app didn't tailor: the résumé made elsewhere that it shows (the one picked
@@ -690,7 +692,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     def get_outside_resume(jid: str):
         """A résumé made outside the app (a resume-job-fit run or a saved résumé) for a job it didn't tailor."""
         src, matched, srcs = outside_resume(jid)
-        ws = ResumeWorkspace(linked.workspace_dir(jid, src, store.root), role=role_of(jid)) if src else None
+        ws = ResumeWorkspace(linked.workspace_dir(jid, src, store.root), **role_of(jid)) if src else None
         try:
             resume = resume_payload(ws, jid) if ws else None
         except EditError as e:
@@ -742,7 +744,8 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             current = ws.history()["current"]
         except (HTTPException, EditError):
             current = None
-        return {"sent": info and {k: info[k] for k in ("name", "source", "note", "recorded")},
+        return {"sent": info and {**{k: info[k] for k in ("name", "source", "note", "recorded")},
+                                  "download_name": sent_download_name(row, info)},
                 "in_notion": bool(names), "notion": local.notion is not None and bool(row.get("notion_page_id")),
                 "current_version": current}
 
@@ -787,7 +790,11 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             except ValueError:
                 raise HTTPException(415, f"{files[0]['name']} in Notion isn't a PDF, so it can't be shown here. "
                                          "Open it from the Notion row.") from None
-        return cached_file(request, info["path"], "application/pdf", info["name"], retitle=True)
+        return cached_file(request, info["path"], "application/pdf", sent_download_name(row, info), retitle=True)
+
+    def sent_download_name(row: dict, info: dict) -> str:
+        """What the sent copy saves as: the app's own as "<Role Title> - <Company>.pdf", a file you added by its name."""
+        return resume_filename(row) if info["source"] == "app" else info["name"]
 
     @app.put("/api/jobs/{jid}/sent")
     async def upload_sent(jid: str, request: Request):

@@ -100,6 +100,13 @@ html[data-theme="sorbet"] .chip b { font: 700 12.5px var(--display); color: var(
 html[data-theme="sorbet"] .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 html[data-theme="sorbet"] .chip[aria-pressed="true"] b { color: var(--paper); }
 html[data-theme="sorbet"] #find-seg b { font-family: var(--display); }
+/* the score filter: each score a little scoop ringed in its fit colour, like the list's */
+html[data-theme="sorbet"] .facet-label { font: 700 13px var(--display); color: var(--muted); }
+html[data-theme="sorbet"] .chip .sc { --b: var(--line); width: 24px; height: 24px; margin-left: -8px; padding: 0; border-radius: 50%; font: 700 12.5px var(--display); background: var(--panel); color: var(--ink); box-shadow: inset 0 0 0 2.5px var(--b); }
+html[data-theme="sorbet"] .chip[data-fit="hi"] .sc { --b: var(--st-applied); }
+html[data-theme="sorbet"] .chip[data-fit="mid"] .sc { --b: #FF9F1C; }
+html[data-theme="sorbet"] .chip[data-fit="lo"] .sc { --b: #D9D0EA; }
+html[data-theme="sorbet"] .chip[aria-pressed="true"] .sc { transform: rotate(-8deg) scale(1.08); transition: transform 620ms var(--open); }
 
 /* the pipeline: a ribbon of scoops, the main line sized by count, the exits as small pills */
 /* the strip keeps its natural width (every label whole); when it and the chips don't fit on one line, the chips wrap below */

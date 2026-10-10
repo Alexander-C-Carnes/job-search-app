@@ -91,12 +91,13 @@ def _now() -> str:
 class ResumeWorkspace:
     run_dir: Path
     exported_pdf: Optional[Path] = None  # the pipeline's deliverable PDF; kept in sync with the current version
-    role: str = ""                       # the job's title, for the PDF's own title (else the posting's)
+    role: str = ""                       # the job's title and company, for the PDF's own title (else the posting's title)
+    company: str = ""
 
     @property
     def pdf_title(self) -> str:
-        """The PDFs' title, which browsers save them under: "<Name> - <Role Title> Resume"."""
-        return config.candidate().resume_title(self.role or self.title())
+        """The PDFs' title, which browsers save them under: "<Role Title> - <Company>"."""
+        return config.candidate().resume_title(self.role or self.title(), self.company)
 
     @property
     def vdir(self) -> Path:

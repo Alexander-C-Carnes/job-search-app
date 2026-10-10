@@ -447,8 +447,8 @@ def test_static_and_pdf_caching(env):
     assert c.get("/static/app.js").headers["cache-control"] == "no-cache"
     r = c.get("/api/jobs/j1/resume/1.pdf", headers=H)
     assert r.status_code == 200 and r.headers["cache-control"] == "private, no-cache"
-    title = c.get("/api/jobs/j1", headers=H).json()["title"]
-    name = f"{config.candidate().name} - {title} Resume.pdf"
+    job = c.get("/api/jobs/j1", headers=H).json()
+    name = f"{job['title']} - {job['company']}.pdf"
     assert r.headers["content-disposition"] == f'inline; filename="{name}"; filename*=UTF-8\'\'{quote(name)}'  # not "1.pdf"
     assert PdfReader(io.BytesIO(r.content)).metadata.title == name[:-4]  # the PDF viewer saves under this, not "<Name> Resume"
     assert c.get("/api/jobs/j1/resume/1.pdf", headers={**H, "If-None-Match": r.headers["etag"]}).status_code == 304
@@ -1106,8 +1106,8 @@ def test_outside_resume_for_a_job_only_in_the_tracker(env, tmp_path):
     assert c.post("/api/jobs/notion-p9/edit/accept", headers=H).json()["current"] == 2
     assert not (run / "versions").exists()      # edits stay in data/, never in the repo's run folder
     v2 = next(env["store"].root.glob("linked/*/versions/v2.pdf"))
-    role = next(j for j in c.get("/api/jobs", headers=H).json()["jobs"] if j["id"] == "notion-p9")["title"]
-    assert PdfReader(v2).metadata.title == config.candidate().resume_title(role)   # drawn with the role's name
+    job = next(j for j in c.get("/api/jobs", headers=H).json()["jobs"] if j["id"] == "notion-p9")
+    assert PdfReader(v2).metadata.title == f"{job['title']} - {job['company']}"   # drawn with the role's name
 
     assert c.post("/api/jobs/notion-p9/outside-resume", headers=H, json={"source": "none"}).json()["resume"] is None
     assert c.post("/api/jobs/notion-p9/outside-resume", headers=H, json={"source": "../x"}).status_code == 400
@@ -1124,13 +1124,15 @@ def test_sent_resume_recorded_when_applied_and_kept_in_notion(env):
     c.post("/api/tracker/p1/status", headers=H, json={"status": "Applied"})
     s = c.get("/api/jobs/j1/sent", headers=H).json()
     assert s["sent"]["source"] == "app" and s["sent"]["note"] == "v1" and s["sent"]["name"] == env["pdf"].name
-    assert PdfReader(io.BytesIO(c.get("/api/jobs/j1/sent.pdf", headers=H).content)).metadata.title == env["pdf"].stem
+    job = c.get("/api/jobs/j1", headers=H).json()
+    shown = c.get("/api/jobs/j1/sent.pdf", headers=H)
+    assert s["sent"]["download_name"] == f"{job['title']} - {job['company']}.pdf" and quote(s["sent"]["download_name"]) in shown.headers["content-disposition"]
+    assert PdfReader(io.BytesIO(shown.content)).metadata.title == f"{job['title']} - {job['company']}"
     assert c.get(f"/api/jobs/j1/sent/file/{env['pdf'].name}", headers=H).content == c.get("/api/jobs/j1/sent.pdf", headers=H).content
     assert jobs("?wait=1")["j1"]["pending"] is False
     assert notion.rows["p1"]["properties"]["Resume Used"]["files"][0]["name"] == env["pdf"].name
-    role = c.get("/api/jobs/j1", headers=H).json()["title"]
     sent_copy = next(data for name, data in notion.uploads.values() if name == env["pdf"].name)
-    assert PdfReader(io.BytesIO(sent_copy)).metadata.title == config.candidate().resume_title(role)   # not "<Name> Resume"
+    assert PdfReader(io.BytesIO(sent_copy)).metadata.title == f"{job['title']} - {job['company']}"   # not "<Name> Resume"
 
     # A file already in Notion's Resume Used is shown (downloaded once), and never replaced by an upload.
     pdf = env["pdf"].read_bytes()

@@ -215,6 +215,14 @@ label.inline input { width: 56px; margin: 0; }
 .chip[data-flag="starred"] .ico svg { fill: var(--star); stroke: var(--star); }
 .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--panel); }
 .chip[aria-pressed="true"] b { color: inherit; }
+/* the score and company filters: a label, then a chip per value (a score in its fit colour) */
+.tools-row.facets { flex-wrap: wrap; gap: 8px 20px; }
+.facet { flex-wrap: wrap; align-items: center; }
+.facet-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 2px; }
+.chip .sc { min-width: 20px; height: 20px; margin-left: -5px; padding: 0 4px; border-radius: 6px; display: inline-grid; place-items: center; font: 600 12px var(--mono); background: var(--panel-2); color: var(--ink); }
+.chip[data-fit="hi"] .sc { background: var(--fit-hi-bg); color: var(--fit-hi); }
+.chip[data-fit="mid"] .sc { background: var(--fit-mid-bg); color: var(--fit-mid); }
+.chip[data-fit="lo"] .sc { background: var(--fit-lo-bg); color: var(--fit-lo); }
 
 /* jobs: list */
 .jobs-body { flex: 1; min-height: 0; display: flex; position: relative; }
