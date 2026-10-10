@@ -50,7 +50,7 @@ class NotionTracker:
                  token: Optional[str] = None, client: Optional[httpx.Client] = None):
         token = token or os.environ.get("NOTION_TOKEN")
         if not token:
-            raise RuntimeError("NOTION_TOKEN is not set (see README: Notion setup)")
+            raise RuntimeError("NOTION_TOKEN is not set (see docs/setup-from-code.md: Set up the Notion tracker)")
         self.ds = data_source_id
         self.project = project_page_id
         self.http = client or httpx.Client(timeout=30)

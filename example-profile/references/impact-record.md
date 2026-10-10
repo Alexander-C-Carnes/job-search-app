@@ -1,6 +1,6 @@
 # Impact record: Jordan Rivera (example)
 
-A made-up candidate, so the app works before you set it up (the tests run as Jordan too). Replace this with your own record: one section per role or major project, with what you did, what changed, and the numbers. See the README's "Add your evidence".
+A made-up candidate, so the app works before you set it up (the tests run as Jordan too). Replace this with your own record: one section per role or major project, with what you did, what changed, and the numbers. See docs/your-evidence.md for what goes in it.
 
 ## 1. Northwind Cloud, Senior Technical Program Manager, Payments Platform (Mar 2023 – Sep 2026)
 

@@ -111,7 +111,7 @@ cmd_run() {
     return
   fi
   setup
-  [ -f "$PROFILE/.env" ] || [ -f .env ] || say "Note: add your keys to $PROFILE/.env (JOBSPIPE_API_KEY, NOTION_TOKEN; see README)."
+  [ -f "$PROFILE/.env" ] || [ -f .env ] || say "Note: add your keys to $PROFILE/.env (JOBSPIPE_API_KEY, NOTION_TOKEN; see docs/setup-from-code.md)."
   say "Starting the app. Keep this window open; Ctrl+C stops it."
   exec .venv/bin/python -m jobpipe serve --port "$PORT" "$@"
 }

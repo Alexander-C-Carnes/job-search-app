@@ -151,7 +151,7 @@ jobs:
               echo
               echo "**Already have it?** Quit Job Search, open the new DMG and drag the app into Applications to replace the old one. Your profile folder (~/JobSearch) and everything in it stay as they are."
               echo
-              echo "**New here?** Drag the app into Applications and open it. If macOS says it can't check the app, open System Settings > Privacy & Security and click Open Anyway (once). Then follow the steps in the README."
+              echo "**New here?** Drag the app into Applications and open it. If macOS says it can't check the app, open System Settings > Privacy & Security and click Open Anyway (once). Then follow [Get started](https://github.com/$GITHUB_REPOSITORY#get-started) to make it yours."
               if [ -n "$SINCE" ]; then echo; echo "Every change: https://github.com/$GITHUB_REPOSITORY/compare/$SINCE...$TAG"; fi
             } > notes.md
             gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Job Search ${TAG#v}" --notes-file notes.md

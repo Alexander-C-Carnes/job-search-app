@@ -62,7 +62,7 @@ def make_tracker(cfg: Config, log: Callable[[str], None]) -> LocalTracker:
         if os.environ.get("NOTION_TOKEN"):
             notion = NotionTracker(cfg.notion_data_source_id, cfg.notion_project_page_id)
         else:
-            log("Notion: NOTION_TOKEN not set, so tracked jobs stay on this Mac and aren't copied to Notion (see README).")
+            log("Notion: NOTION_TOKEN not set, so tracked jobs stay on this Mac and aren't copied to Notion (see docs/setup-from-code.md).")
     return LocalTracker(config.DATA / "tracker.db", notion=notion, seed=config.DATA / "notion-cache.json")
 
 
