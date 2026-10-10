@@ -1165,12 +1165,25 @@ def role_as_job(s: dict, role: dict) -> dict:
     return job
 
 
+def stage_round(s: dict) -> tuple[str, str]:
+    """(round, where it was seen) for a startup whose stage came without a round, from a VC board: 'Series H' for
+    the board's 'series_h' (the stage alone says only 'Series D+'), and the board. ('', '') if the stage is unknown."""
+    stage = s.get("stage") or "Unknown"
+    if stage == "Unknown":
+        return "", ""
+    g = (s.get("getro_stage") or "").lower()
+    name = round_label(g.replace("_", " ")) if re.fullmatch(r"series_[a-z]|seed|pre_seed", g) else stage
+    board = next((x.get("name") or "" for x in s.get("sources") or [] if x.get("kind") == "vc"), "")
+    return name, board
+
+
 def funding_block(s: dict) -> dict:
     """What a job carries about its company's funding: shown as the round chip and written to the tracker."""
     r = s.get("round") or {}
-    return {"startup_id": s.get("id"), "stage": s.get("stage") or "Unknown", "round": r.get("name") or "",
+    name, source = (r.get("name") or "", r.get("source") or "") if r else stage_round(s)
+    return {"startup_id": s.get("id"), "stage": s.get("stage") or "Unknown", "round": name,
             "amount": money(r.get("amount_usd"), r.get("currency") or "$", r.get("amount")), "date": r.get("date") or "",
-            "headline": r.get("headline") or "", "url": r.get("url") or "", "source": r.get("source") or "",
+            "headline": r.get("headline") or "", "url": r.get("url") or "", "source": source,
             "batch": batch_short(s.get("batch") or ""), "yc_stage": s.get("yc_stage") or "", "team_size": s.get("team_size")}
 
 

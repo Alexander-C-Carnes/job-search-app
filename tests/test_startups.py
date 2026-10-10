@@ -221,6 +221,16 @@ def test_round_lookups(tmp_path, client):
     assert su.getro_stage("series_f") == "Series D+" and su.getro_stage("pre_seed") == "Pre-seed" and su.getro_stage(None) == "Unknown"
 
 
+def test_a_vc_boards_stage_shows_as_its_round():
+    # A VC board names the stage but no article does: the round chip says the board's round, not "Round unknown".
+    s = {"id": "anduril", "name": "Anduril", "stage": "Series D+", "getro_stage": "series_h",
+         "sources": [{"kind": "vc", "name": "General Catalyst portfolio", "url": "https://jobs.generalcatalyst.com", "at": ""}]}
+    assert su.stage_round(s) == ("Series H", "General Catalyst portfolio")
+    assert su.funding_line(su.funding_block(s)) == "Series H (General Catalyst portfolio)"
+    assert su.stage_round({**s, "stage": "Growth", "getro_stage": "ipo"}) == ("Growth", "General Catalyst portfolio")
+    assert su.stage_round({"stage": "Unknown", "getro_stage": "series_unknown"}) == ("", "")
+
+
 def test_roles_answer_a_search_by_title_and_place():
     from jobpipe.config import Search
     remote = Search(id="em-remote", name="EM remote", titles=["Engineering Manager"], exclude_titles=["Intern"], remote=True)

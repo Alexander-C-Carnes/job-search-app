@@ -1223,12 +1223,14 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
             jobs.append({k: j.get(k) for k in ("title", "url", "location", "remote", "posted", "match", "pay")}
                         | {"job_id": had["id"] if had else None, "status": had["status"] if had else ""})
         company = startups_tracked().get(s.get("key") or "")
+        f = funding_block(s)
         return {"id": s["id"], "name": s["name"], "website": s.get("website", ""), "domain": s.get("domain", ""),
                 "one_liner": s.get("one_liner", ""), "description": s.get("description", ""), "stage": s.get("stage") or "Unknown",
                 "round": {"name": r.get("name", ""), "amount": su.money(r.get("amount_usd"), r.get("currency") or "$", r.get("amount")),
                           "amount_usd": r.get("amount_usd"), "date": r.get("date", ""), "headline": r.get("headline", ""),
                           "url": r.get("url", ""), "source": r.get("source", "")} if r else None,
-                "line": funding_line(funding_block(s)), "hq": s.get("hq", ""), "industries": s.get("industries") or [],
+                "stage_round": "" if r else f["round"], "stage_source": "" if r else f["source"],
+                "line": funding_line(f), "hq": s.get("hq", ""), "industries": s.get("industries") or [],
                 "tags": s.get("tags") or [], "team_size": s.get("team_size"), "batch": su.batch_short(s.get("batch") or ""),
                 "batch_full": s.get("batch", ""), "yc_stage": s.get("yc_stage", ""), "yc_url": s.get("yc_url", ""),
                 "jobs_url": s.get("jobs_url", ""), "hiring": bool(s.get("hiring")), "sources": s.get("sources") or [],

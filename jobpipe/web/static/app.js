@@ -2788,9 +2788,9 @@ function startupRow(s) {
         h("div", { class: "t" }, s.name),
         h("div", { class: "s" }, [s.one_liner, s.hq].filter(Boolean).join(" · ")),
         h("div", { class: "tags" },
-          h("span", { class: "tag round-tag", "data-round": s.stage, title: s.line }, s.round ? (s.round.name || s.stage) : s.batch ? `YC ${s.batch}` : "Round unknown",
+          h("span", { class: "tag round-tag", "data-round": s.stage, title: s.line }, s.round ? (s.round.name || s.stage) : s.stage_round || (s.batch ? `YC ${s.batch}` : "Round unknown"),
             s.round?.amount && h("b", {}, ` ${s.round.amount}`), s.round?.date && h("b", {}, ` · ${fmtDate(s.round.date + "T12:00")}`)),
-          s.batch && s.round && h("span", { class: "tag" }, `YC ${s.batch}`),
+          s.batch && (s.round || s.stage_round) && h("span", { class: "tag" }, `YC ${s.batch}`),
           s.exited && h("span", { class: "tag", title: "A VC board still lists it, but it was acquired or went public, so its roles aren't added to Find jobs on their own" }, s.exited === "public" ? "Public" : "Acquired"),
           s.hiring && h("span", { class: "tag" }, "Hiring"),
           rolesTag(s),
@@ -2871,6 +2871,7 @@ function renderStartupDetail() {
     busy === kind ? [spinner(), " ", label] : label);
   const r = s.round;
   const roundText = r ? [r.name || s.stage, r.amount, r.date && new Date(r.date + "T12:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })].filter(Boolean).join(" · ")
+    : s.stage_round ? `${s.stage_round}${s.stage_source ? ` · per the ${s.stage_source} board` : ""} · amount and date not in the news yet`
     : s.batch ? `Round not in the news yet · YC ${s.batch}${s.yc_stage ? ` (${s.yc_stage.toLowerCase()} stage)` : ""}` : "Round unknown";
   const head = h("div", { class: "dhead" },
     h("div", { class: "dhead-top" },
