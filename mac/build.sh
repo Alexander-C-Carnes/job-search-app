@@ -129,19 +129,23 @@ fi
 
 say "DMG"
 DMG="$BUILD/Job-Search-$VERSION-$ARCH.dmg"
-STAGE="$BUILD/dmg"; rm -rf "$STAGE"; mkdir -p "$STAGE"
-cp -R "$APP" "$STAGE/"
-ln -s /Applications "$STAGE/Applications"
+# dmgbuild lays out the window (background, icon places, no toolbar) without Finder. It runs on the bundled
+# Python from a folder of its own, and writes no .pyc files, which would break the app's signature.
+export PYTHONDONTWRITEBYTECODE=1
+DMGBUILD="$CACHE/dmgbuild-1.6.7"
+[ -d "$DMGBUILD" ] || "$PY" -m pip install --quiet --disable-pip-version-check --target "$DMGBUILD" dmgbuild==1.6.7
+BG_FLAGS=(); [ -n "$NOTARIZE" ] || BG_FLAGS=(--open-anyway)
+swift mac/make_dmg_background.swift "$BUILD/dmg-background.png" "$BUILD/dmg-background@2x.png" ${BG_FLAGS[@]+"${BG_FLAGS[@]}"}
 # hdiutil now and then fails on GitHub's Macs ("Resource busy"), so try three times and say why each failed.
-# Not -quiet: that hides hdiutil's error along with its progress.
 for try in 1 2 3; do
   rm -f "$DMG"
-  if out=$(hdiutil create -volname "Job Search" -srcfolder "$STAGE" -fs HFS+ -format UDZO "$DMG" 2>&1); then break; fi
-  printf 'hdiutil create failed (try %s of 3):\n%s\n' "$try" "$out"
+  if out=$(PYTHONPATH="$DMGBUILD" "$PY" -m dmgbuild -s mac/dmg_settings.py -D app="$APP" \
+      -D icon="$RES/AppIcon.icns" -D background="$BUILD/dmg-background.png" "Job Search" "$DMG" 2>&1); then break; fi
+  printf 'Making the DMG failed (try %s of 3):\n%s\n' "$try" "$out"
   [ "$try" = 3 ] && exit 1
   sleep $((try * 15))
 done
-rm -rf "$STAGE"
+unset PYTHONDONTWRITEBYTECODE
 [ -n "$IDENTITY" ] && codesign --force --timestamp --sign "$IDENTITY" "$DMG"
 
 if [ -n "$NOTARIZE" ]; then
