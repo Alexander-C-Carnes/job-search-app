@@ -11,7 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from jobpipe import config, evidence  # noqa: E402
+from jobpipe import config, evidence, postings  # noqa: E402
 from jobpipe.llm import AgentResult  # noqa: E402
 
 TITLE = "Staff Technical Program Manager"
@@ -221,6 +221,13 @@ def no_evidence_models():
     evidence.load = off
     yield
     evidence.load = real
+
+
+@pytest.fixture(autouse=True)
+def no_posting_keeper(monkeypatch):
+    """The app's background keeper of applied postings would read pages from the web mid-test; it's off,
+    and a test that wants it calls PostingKeeper.run_once() itself."""
+    monkeypatch.setattr(postings.PostingKeeper, "kick", lambda self: None)
 
 
 @pytest.fixture(autouse=True)

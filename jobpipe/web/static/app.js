@@ -1524,6 +1524,7 @@ function postingMeta(j, d) {
     found.length ? h("span", {}, "Found by ", found.join(", ")) : null,
     extLink(j.url, "Open the original"),
     d.description_pasted && h("span", {}, d.description_read ? "Added from its link " : "Pasted by you ", fmtDate(d.description_pasted)),
+    !d.description_pasted && d.posting_kept && h("span", { title: "Kept because you applied: it stays here after the posting comes down." }, "Saved when you applied ", fmtDate(d.posting_kept)),
     h("button", { class: "link-btn", onclick: () => openDescribe(j, d.description_pasted ? d.description : "") },
       d.description_pasted ? "Replace the pasted text…" : "Paste the description…"));
 }

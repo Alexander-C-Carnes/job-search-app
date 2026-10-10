@@ -113,8 +113,8 @@ class TrackerSync:
     sync now (after a change made here), refresh() runs one and raises if Notion fails.
     """
 
-    def __init__(self, tracker: LocalTracker, ttl: float = 60.0):
-        self.tracker, self.ttl = tracker, ttl
+    def __init__(self, tracker: LocalTracker, ttl: float = 60.0, after: Callable[[], None] = lambda: None):
+        self.tracker, self.ttl, self.after = tracker, ttl, after   # after: called once a sync has read Notion
         self.at = 0.0            # when a sync was last tried
         self._idle = threading.Event()
         self._idle.set()
@@ -161,6 +161,7 @@ class TrackerSync:
     def refresh(self) -> None:
         self.at = time.time()
         self.tracker.sync()
+        self.after()
 
     def wait(self, timeout: float = 20.0) -> None:
         self._idle.wait(timeout)

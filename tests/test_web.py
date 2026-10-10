@@ -266,6 +266,23 @@ def test_score_experience_from_impact_record(env, monkeypatch):
     assert c.get("/api/summary", headers=H).json()["impact_record"]["path"].endswith("impact-record.md")
 
 
+def test_a_job_you_apply_to_keeps_its_posting(env, monkeypatch):
+    c, app = env["client"], env["app"]
+    from jobpipe.postings import PostingKeeper
+    kicks = []
+    monkeypatch.setattr(PostingKeeper, "kick", lambda self: kicks.append(1))
+    c.get("/api/jobs", headers=H)
+    assert c.post("/api/tracker/p1/status", headers=H, json={"status": "Applied"}).status_code == 200 and kicks
+    import jobpipe.jd
+    monkeypatch.setattr(jobpipe.jd, "read_posting",
+                        lambda url, client=None: {"url": url, "description": "Lead programs. " * 40})
+    app.state.posting_keeper.run_once()
+    # p9 was only in Notion, applied to: its posting is stored and opens with the role
+    d = c.get("/api/jobs/notion-p9", headers=H).json()
+    assert d["local"] and d["status"] == "Applied" and d["description"].startswith("Lead programs.")
+    assert d["posting_kept"]
+
+
 def test_add_a_job_from_its_link(env, monkeypatch):
     c = env["client"]
     import jobpipe.jd

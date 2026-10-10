@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import config
 from ..config import Config
 from .. import formats, jd, render, resume_import
+from ..postings import PostingKeeper
 from ..jd import MIN_PASTED_CHARS, build_jd, normalize_posting_url, posting_url
 from ..config import ModelCfg
 from ..llm import BACKEND_LABELS, CLAUDE_MODELS, PROVIDERS, AgentError, OpenAICompatRunner, Runner
@@ -176,7 +177,11 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
     # run starts from the last Notion snapshot the app saved, so nothing tracked is lost in the move.
     local = tracker if isinstance(tracker, LocalTracker) else LocalTracker(
         store.root / "tracker.db", notion=tracker, seed=store.root / "notion-cache.json")
-    sync = TrackerSync(local)
+    # A job you applied to keeps its posting: saved when its status reaches an applied stage, here or in Notion.
+    keeper = PostingKeeper(store, local)
+    app.state.posting_keeper = keeper
+    sync = TrackerSync(local, after=keeper.kick)
+    keeper.kick()
     runs = runs or RunManager(db=local.path)   # run history sits beside the tracker in data/tracker.db
     progress = Estimator(runs)                 # how far along a tailoring run is, for the ring on its fit badge
     marks = Marks(store.root / "marks.json")
@@ -399,6 +404,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
                     record_current(row)
                 except HTTPException:
                     pass            # no résumé in the app for it; the job shows "No résumé on file"
+        keeper.kick()
         sync.kick()
         return {"ok": True}
 
@@ -652,6 +658,7 @@ def create_app(cfg: Config, *, token: str, store: Optional[Store] = None,
                                   "full_score": st.get("full_score"), "full_scored_at": st.get("full_scored_at") or "",
                                   "description": job.get("description") or "", "description_pasted": job.get("description_pasted") or "",
                                   "description_read": bool(job.get("description_read")),
+                                  "posting_kept": job.get("posting_kept") or "",
                                   "has_heatmap": bool(heatmap_path(jid))}
         if row["tailored"]:
             ws = workspace(jid)

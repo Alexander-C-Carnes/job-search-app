@@ -121,6 +121,13 @@ class Store:
         job.update(description=text, description_pasted=now_iso(), description_read=False)
         _write(self.jobs_dir / f"{jid}.json", job)
 
+    def keep_posting(self, jid: str, text: str) -> None:
+        """Keep the posting text read from a stored job's page (a job you applied to, whose listing text was
+        short), so it can be read after the page comes down."""
+        job = self.job(jid)
+        job.update(description=text, posting_kept=now_iso())
+        _write(self.jobs_dir / f"{jid}.json", job)
+
     def state(self) -> dict:
         return _read(self.state_path, {})
 

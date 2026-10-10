@@ -73,3 +73,46 @@ def test_the_board_tags_closed_roles(tmp_dirs):
     store.update("a", dismissed=True, closed_at="2026-10-06T10:00:00+00:00")
     board = JobBoard(store, TrackerSync(LocalTracker(tmp_dirs / "t.db")), Marks(tmp_dirs / "m.json"), lambda d: {})
     assert board.row("a")["closed"] == "2026-10-06T10:00:00+00:00" and board.row("a")["dismissed"]
+
+
+def test_postings_you_applied_to_are_kept(tmp_dirs):
+    from jobpipe.notion import TrackerEntry
+    from jobpipe.tracker import LocalTracker
+    store, t = Store(), LocalTracker(tmp_dirs / "t.db")
+    store.save_job({"id": "full", "job_title": "EM", "company": "B", "url": "https://b.example/1", "description": "x" * 700}, "s")
+    store.save_job({"id": "stub", "job_title": "TPM", "company": "C", "url": "https://c.example/1", "description": "short"}, "s")
+    track = lambda title, company, url, status="Applied", jid=None: t.track(
+        TrackerEntry(title=title, company=company, url=url, fit_score=None, notes="", status=status, body=[]), job_id=jid)
+    track("Staff TPM", "Acme", "https://a.example/1")                 # only in the tracker
+    track("EM", "B", "https://b.example/1", jid="full")               # its posting is stored already
+    track("TPM", "C", "https://c.example/1?utm_source=x")             # stored, from a search, with a stub of a listing
+    track("PM", "Gone", "https://gone.example/1")                     # the page has come down
+    track("PM", "Later", "https://later.example/1", status="Not started")
+    pages = {"https://a.example/1": {"job_title": "Staff TPM (page)", "location": "Remote", "remote": True,
+                                     "description": "Run the release train. " * 30},
+             "https://c.example/1?utm_source=x": {"description": "Own the roadmap. " * 30}}
+    reads = []
+
+    def read(url):
+        reads.append(url)
+        return {"url": url, **pages.get(url, {"description": ""})}
+    counts = postings.keep_applied(store, t, read=read)
+    rows = {r["company"]: r for r in t.rows()}
+    assert counts["kept"] == 2 and counts["failed"] == [rows["Gone"]["page_id"]]
+    assert sorted(reads) == ["https://a.example/1", "https://c.example/1?utm_source=x", "https://gone.example/1"]
+    a = store.job(rows["Acme"]["job_id"])
+    assert rows["Acme"]["job_id"] == "notion-" + rows["Acme"]["page_id"]           # the id scoring would give it
+    assert (a["job_title"], a["company"], a["url"], a["location"], a["remote"]) == \
+        ("Staff TPM", "Acme", "https://a.example/1", "Remote", True)
+    assert a["description"].startswith("Run the release train.") and a["posting_kept"] and postings.has_posting(a)
+    assert rows["C"]["job_id"] == "stub" and store.job("stub")["description"].startswith("Own the roadmap.")
+    assert store.job("full")["description"] == "x" * 700 and rows["Later"]["job_id"] is None
+    # kept for good: the next pass reads nothing but the page that couldn't be read
+    reads.clear()
+    assert postings.keep_applied(store, t, read=read)["kept"] == 0 and reads == ["https://gone.example/1"]
+    # the app's keeper doesn't fetch a page that just failed again until RECHECK_HOURS have passed
+    keeper = postings.PostingKeeper(store, t, read=read)
+    reads.clear()
+    keeper.run_once()
+    keeper.run_once()
+    assert reads == ["https://gone.example/1"]
